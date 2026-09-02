@@ -1,0 +1,11 @@
+# 本地 Agent 配置（不上传）
+.claude/
+
+# 操作系统文件
+Thumbs.db
+.DS_Store
+
+# 编辑器/IDE
+.vscode/
+.idea/
+*.swp
