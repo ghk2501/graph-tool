@@ -1,0 +1,1608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>可视化图分析工具</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "Microsoft YaHei", sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            overflow: hidden;
+        }
+        .app-container {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .canvas-container {
+            flex: 1;
+            background: #fff;
+            position: relative;
+            overflow: hidden;
+        }
+        #graphSvg {
+            width: 100%;
+            height: 100%;
+            cursor: default;
+        }
+
+        .toolbar {
+            height: 56px;
+            background: #fff;
+            border-top: 1px solid #e4e7ed;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 10px;
+        }
+        .tool-btn {
+            padding: 8px 16px;
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .tool-btn:hover {
+            border-color: #409eff;
+            color: #409eff;
+        }
+        .tool-btn.active {
+            background: #409eff;
+            color: #fff;
+            border-color: #409eff;
+        }
+        .tool-divider {
+            width: 1px;
+            height: 24px;
+            background: #e4e7ed;
+            margin: 0 5px;
+        }
+
+        .control-panel {
+            width: 360px;
+            padding: 15px;
+            overflow-y: auto;
+            background: #f5f7fa;
+            border-left: 1px solid #e4e7ed;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .card-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #34495e;
+            font-size: 14px;
+            border-left: 3px solid #409eff;
+            padding-left: 8px;
+        }
+        .btn {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+            background: #409eff;
+            color: #fff;
+        }
+        .btn:hover { background: #66b1ff; }
+        .btn-secondary { background: #909399; }
+        .btn-secondary:hover { background: #a6a9ad; }
+        .btn-wide { width: 100%; flex: none; margin-bottom: 8px; }
+
+        .form-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .form-item { flex: 1; }
+        .form-item label {
+            display: block;
+            font-size: 12px;
+            color: #606266;
+            margin-bottom: 3px;
+        }
+        select, input {
+            width: 100%;
+            padding: 5px 8px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            font-size: 13px;
+            outline: none;
+        }
+        select:focus, input:focus { border-color: #409eff; }
+
+        .radio-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .radio-label {
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+        }
+
+        .result-count {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+        .result-list {
+            max-height: 160px;
+            overflow-y: auto;
+            border: 1px solid #ebeef5;
+            border-radius: 4px;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        .result-item {
+            padding: 4px 8px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .result-item:hover { background: #ecf5ff; }
+        .result-item:last-child { border-bottom: none; }
+
+        .shortest-section {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed #e4e7ed;
+        }
+        .shortest-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #67c23a;
+            margin-bottom: 6px;
+        }
+
+        .tip {
+            font-size: 12px;
+            color: #909399;
+            line-height: 1.5;
+            margin-top: 5px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 60px;
+            padding: 6px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            resize: vertical;
+            outline: none;
+        }
+
+        .context-menu {
+            position: absolute;
+            background: #fff;
+            border: 1px solid #e4e7ed;
+            border-radius: 4px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            z-index: 9999;
+            min-width: 150px;
+            display: none;
+            user-select: none;
+        }
+        .menu-item {
+            padding: 8px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            border-bottom: 1px solid #f5f5f5;
+            transition: background 0.2s;
+        }
+        .menu-item:hover {
+            background: #ecf5ff;
+            color: #409eff;
+        }
+        .menu-item:last-child { border-bottom: none; }
+        .menu-item.danger { color: #f56c6c; }
+        .menu-item.danger:hover { background: #fef0f0; }
+        .menu-subtitle {
+            padding: 6px 12px;
+            font-size: 11px;
+            color: #909399;
+            background: #fafafa;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .new-node-panel {
+            position: absolute;
+            background: #fff;
+            border: 1px solid #e4e7ed;
+            border-radius: 6px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            z-index: 9999;
+            width: 220px;
+            padding: 12px;
+            display: none;
+            user-select: none;
+        }
+        .new-node-panel .panel-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #303133;
+            text-align: left;
+        }
+        .new-node-panel .form-item { margin-bottom: 8px; }
+        .new-node-panel .form-item:last-child { margin-bottom: 0; }
+        .new-node-panel input[type="color"] {
+            height: 28px;
+            padding: 2px;
+            cursor: pointer;
+        }
+        .new-node-panel .panel-btns {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            justify-content: flex-end;
+        }
+        .panel-btn {
+            padding: 5px 12px;
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .panel-btn.primary {
+            background: #409eff;
+            color: #fff;
+            border-color: #409eff;
+        }
+
+        .node-shape {
+            stroke: #fff;
+            stroke-width: 2;
+            cursor: pointer;
+            transition: filter 0.2s;
+        }
+        .node-shape:hover { filter: brightness(1.1); }
+        .node-text {
+            fill: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            pointer-events: none;
+            user-select: none;
+        }
+        .edge-line, .edge-arc {
+            fill: none;
+            stroke-width: 2;
+            cursor: pointer;
+            transition: stroke-width 0.2s;
+        }
+        .edge-line:hover, .edge-arc:hover { stroke-width: 3; }
+        .control-point {
+            fill: #fff;
+            stroke: #909399;
+            stroke-width: 1.5;
+            cursor: move;
+        }
+        .control-point:hover { stroke: #409eff; stroke-width: 2; }
+
+        .temp-draw-line {
+            fill: none;
+            stroke: #409eff;
+            stroke-width: 2;
+            stroke-dasharray: 6 4;
+            pointer-events: none;
+            opacity: 0.8;
+        }
+
+        .highlight-edge {
+            stroke: #e74c3c !important;
+            stroke-width: 3 !important;
+        }
+        .highlight-node {
+            fill: #e74c3c !important;
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <div class="main-area">
+        <div class="canvas-container">
+            <svg id="graphSvg">
+                <defs>
+                    <marker id="arrow-default" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                        <polygon points="0 0, 10 5, 0 10" fill="#606266"/>
+                    </marker>
+                    <marker id="arrow-start-default" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                        <polygon points="10 0, 0 5, 10 10" fill="#606266"/>
+                    </marker>
+                    <marker id="arrow-red" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+                        <polygon points="0 0, 10 5, 0 10" fill="#e74c3c"/>
+                    </marker>
+                    <marker id="arrow-start-red" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+                        <polygon points="10 0, 0 5, 10 10" fill="#e74c3c"/>
+                    </marker>
+                </defs>
+                <g id="edgesGroup"></g>
+                <g id="nodesGroup"></g>
+                <g id="controlPointsGroup"></g>
+                <g id="tempDrawGroup"></g>
+            </svg>
+        </div>
+        <div class="toolbar">
+            <button class="tool-btn active" data-tool="select" onclick="switchTool('select')">
+                <span>🖱</span> 选择工具
+            </button>
+            <div class="tool-divider"></div>
+            <button class="tool-btn" data-tool="draw" onclick="switchTool('draw')">
+                <span>✏️</span> 连线工具
+            </button>
+            <div class="tool-divider"></div>
+            <button class="tool-btn" onclick="addNode()">
+                <span>➕</span> 添加节点
+            </button>
+            <button class="tool-btn" onclick="clearAll()">
+                <span>🗑</span> 清空画布
+            </button>
+        </div>
+    </div>
+
+    <div class="control-panel">
+        <div class="panel-title">图分析工具</div>
+
+        <div class="card">
+            <div class="card-title">数据导入导出</div>
+            <textarea id="importText" placeholder="格式示例：0-1，0~1，0=2，1~~3"></textarea>
+            <div class="form-row" style="margin-top: 8px;">
+                <button class="btn" onclick="importFromText()">导入</button>
+                <button class="btn btn-secondary" onclick="exportToText()">导出</button>
+            </div>
+            <div class="tip">支持单向(-/~)、双向(=/~~)，中文/英文逗号/换行分隔</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">环路分析</div>
+            <button class="btn btn-wide" onclick="calculateCycles()">计算所有简单环路</button>
+            <div>共找到 <span class="result-count" id="cycleCount">0</span> 个环路</div>
+            <div class="result-list" id="cycleList"></div>
+            <div class="tip">点击环路高亮显示，2秒后自动取消</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">两点路径分析</div>
+            <div class="form-row">
+                <div class="form-item">
+                    <label>起点</label>
+                    <select id="pathStart"></select>
+                </div>
+                <div class="form-item">
+                    <label>终点</label>
+                    <select id="pathEnd"></select>
+                </div>
+            </div>
+            <button class="btn btn-wide" onclick="calculatePaths()">查询所有路径</button>
+            <div>简单路径总数：<span class="result-count" id="pathCount">0</span></div>
+            
+            <div class="shortest-section">
+                <div class="shortest-title">最短路径</div>
+                <div>边数：<span class="result-count" id="shortestLen">-</span></div>
+                <div>共 <span class="result-count" id="shortestCount">0</span> 条</div>
+                <div class="result-list" id="shortestList"></div>
+            </div>
+
+            <div style="margin-top:10px;">全部路径：</div>
+            <div class="result-list" id="pathList"></div>
+            <div class="tip">点击路径高亮显示，2秒后自动取消</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">几何交点统计</div>
+            <div class="radio-group">
+                <label class="radio-label"><input type="radio" name="interType" value="all" checked> 全部交点</label>
+                <label class="radio-label"><input type="radio" name="interType" value="line-line"> 直线-直线</label>
+                <label class="radio-label"><input type="radio" name="interType" value="line-arc"> 直线-弧线</label>
+                <label class="radio-label"><input type="radio" name="interType" value="arc-arc"> 弧线-弧线</label>
+            </div>
+            <button class="btn btn-wide" onclick="calculateIntersections()">统计交点数量</button>
+            <div>共 <span class="result-count" id="intersectionCount">0</span> 个交叉点</div>
+            <div class="tip">弧线采用离散采样计算，节点连接处不计入</div>
+        </div>
+    </div>
+</div>
+
+<div id="contextMenu" class="context-menu"></div>
+
+<div id="newNodePanel" class="new-node-panel">
+    <div class="panel-title">新建节点与连线</div>
+    <div class="form-item">
+        <label>节点颜色</label>
+        <input type="color" id="newNodeColor" value="#409eff">
+    </div>
+    <div class="form-item">
+        <label>节点形状</label>
+        <select id="newNodeShape">
+            <option value="circle">● 圆形</option>
+            <option value="square">■ 方形</option>
+            <option value="triangle">▲ 三角形</option>
+            <option value="pentagon">⬠ 五边形</option>
+            <option value="hexagon">⬡ 六边形</option>
+        </select>
+    </div>
+    <div class="form-item">
+        <label>连线类型</label>
+        <select id="newEdgeType">
+            <option value="-">单向直线</option>
+            <option value="~">单向弧线</option>
+            <option value="=">双向直线</option>
+            <option value="~~">双向弧线</option>
+        </select>
+    </div>
+    <div class="panel-btns">
+        <button class="panel-btn" onclick="closeNewNodePanel(false)">取消</button>
+        <button class="panel-btn primary" onclick="closeNewNodePanel(true)">确定</button>
+    </div>
+</div>
+
+<script>
+    const svg = document.getElementById('graphSvg');
+    const edgesGroup = document.getElementById('edgesGroup');
+    const nodesGroup = document.getElementById('nodesGroup');
+    const controlPointsGroup = document.getElementById('controlPointsGroup');
+    const tempDrawGroup = document.getElementById('tempDrawGroup');
+    const contextMenu = document.getElementById('contextMenu');
+    const newNodePanel = document.getElementById('newNodePanel');
+
+    let nodes = [];
+    let edges = [];
+    let nextNodeId = 0;
+    let nextEdgeId = 0;
+
+    let currentTool = 'select';
+    let dragging = null;
+    let drawingTemp = null;
+    let newNodeCallback = null;
+
+    let cycles = [];
+    let paths = [];
+    let activeHighlightType = null;
+    let activeHighlightIndex = -1;
+    let highlightTimer = null;
+
+    const ARROW_OFFSET = 4;
+    const ARC_SAMPLE_STEPS = 24;
+    const HIGHLIGHT_DURATION = 2000;
+
+    function getRegularPolygonPoints(cx, cy, radius, sides, rotation = -Math.PI/2) {
+        const points = [];
+        for (let i = 0; i < sides; i++) {
+            const angle = rotation + i * 2 * Math.PI / sides;
+            points.push(`${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`);
+        }
+        return points.join(' ');
+    }
+
+    function init() {
+        addNode(200, 150);
+        addNode(400, 150);
+        addNode(500, 300);
+        addNode(300, 400);
+        addNode(150, 300);
+        
+        addEdgeById(0, 1, '-', false);
+        addEdgeById(0, 1, '~', false);
+        addEdgeById(1, 2, '-', false);
+        addEdgeById(2, 3, '~', true);
+        addEdgeById(3, 4, '-', false);
+        addEdgeById(4, 0, '-', false);
+
+        updatePathSelects();
+        render();
+        bindEvents();
+    }
+
+    function switchTool(tool) {
+        currentTool = tool;
+        drawingTemp = null;
+        clearTempDraw();
+        hideAllMenus();
+        document.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tool === tool);
+        });
+        render();
+    }
+
+    function addNode(x, y, color = '#409eff', shape = 'circle', size = 18) {
+        if (x === undefined) {
+            const rect = svg.getBoundingClientRect();
+            x = rect.width / 2 + (Math.random() - 0.5) * 100;
+            y = rect.height / 2 + (Math.random() - 0.5) * 100;
+        }
+        const node = { id: nextNodeId++, x, y, color, shape, size };
+        nodes.push(node);
+        updatePathSelects();
+        render();
+        return node;
+    }
+
+    function getNodeById(id) {
+        return nodes.find(n => n.id === id);
+    }
+
+    function deleteNode(id) {
+        edges = edges.filter(e => e.u !== id && e.v !== id);
+        nodes = nodes.filter(n => n.id !== id);
+        updatePathSelects();
+        render();
+        hideAllMenus();
+    }
+
+    function hideAllMenus() {
+        contextMenu.style.display = 'none';
+        newNodePanel.style.display = 'none';
+    }
+
+    function openNewNodePanel(x, y, callback) {
+        document.getElementById('newNodeColor').value = '#409eff';
+        document.getElementById('newNodeShape').value = 'circle';
+        document.getElementById('newEdgeType').value = '-';
+        newNodeCallback = callback;
+
+        newNodePanel.style.left = x + 'px';
+        newNodePanel.style.top = y + 'px';
+        newNodePanel.style.display = 'block';
+
+        const rect = newNodePanel.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            newNodePanel.style.left = (x - rect.width) + 'px';
+        }
+        if (rect.bottom > window.innerHeight) {
+            newNodePanel.style.top = (y - rect.height) + 'px';
+        }
+    }
+
+    function closeNewNodePanel(confirm) {
+        newNodePanel.style.display = 'none';
+        if (confirm && newNodeCallback) {
+            const config = {
+                color: document.getElementById('newNodeColor').value,
+                shape: document.getElementById('newNodeShape').value,
+                edgeType: document.getElementById('newEdgeType').value
+            };
+            newNodeCallback(config);
+        }
+        newNodeCallback = null;
+    }
+
+    function changeNodeColor(id) {
+        const node = getNodeById(id);
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.value = node.color;
+        input.onchange = () => {
+            node.color = input.value;
+            render();
+        };
+        input.click();
+        hideAllMenus();
+    }
+
+    function changeNodeSize(id) {
+        const node = getNodeById(id);
+        const size = prompt('设置节点大小（10-50）', node.size);
+        if (size !== null) {
+            const val = parseFloat(size);
+            if (!isNaN(val)) {
+                node.size = Math.max(10, Math.min(50, val));
+                render();
+            }
+        }
+        hideAllMenus();
+    }
+
+    function changeNodeShape(id, shape) {
+        const node = getNodeById(id);
+        node.shape = shape;
+        render();
+        hideAllMenus();
+    }
+
+    function updatePathSelects() {
+        ['pathStart', 'pathEnd'].forEach(id => {
+            const sel = document.getElementById(id);
+            sel.innerHTML = '';
+            nodes.forEach(n => sel.innerHTML += `<option value="${n.id}">${n.id}</option>`);
+        });
+        if (nodes.length >= 2) document.getElementById('pathEnd').value = nodes[1].id;
+    }
+
+    function addEdgeById(u, v, type, bidirectional) {
+        if (u === v) return;
+        const edge = {
+            id: nextEdgeId++,
+            u, v, type, bidirectional,
+            color: type === '-' ? '#606266' : '#409eff'
+        };
+        if (type === '~') {
+            edge.controlPoint = computeDefaultControlPoint(u, v);
+        }
+        edges.push(edge);
+        return edge;
+    }
+
+    function computeDefaultControlPoint(uId, vId) {
+        const u = getNodeById(uId);
+        const v = getNodeById(vId);
+        const dx = v.x - u.x;
+        const dy = v.y - u.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const offset = len * 0.25;
+        const nx = -dy / len * offset;
+        const ny = dx / len * offset;
+        return { x: (u.x + v.x) / 2 + nx, y: (u.y + v.y) / 2 + ny };
+    }
+
+    function deleteEdge(id) {
+        edges = edges.filter(e => e.id !== id);
+        render();
+        hideAllMenus();
+    }
+
+    function toggleEdgeShape(id) {
+        const edge = edges.find(e => e.id === id);
+        if (edge.type === '-') {
+            edge.type = '~';
+            edge.controlPoint = computeDefaultControlPoint(edge.u, edge.v);
+            edge.color = '#409eff';
+        } else {
+            edge.type = '-';
+            delete edge.controlPoint;
+            edge.color = '#606266';
+        }
+        render();
+        hideAllMenus();
+    }
+
+    function toggleEdgeDirection(id) {
+        const edge = edges.find(e => e.id === id);
+        edge.bidirectional = !edge.bidirectional;
+        render();
+        hideAllMenus();
+    }
+
+    function changeEdgeColor(id) {
+        const edge = edges.find(e => e.id === id);
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.value = edge.color;
+        input.onchange = () => {
+            edge.color = input.value;
+            render();
+        };
+        input.click();
+        hideAllMenus();
+    }
+
+    function render() {
+        renderEdges();
+        renderNodes();
+        renderControlPoints();
+    }
+
+    function renderNodes() {
+        nodesGroup.innerHTML = '';
+        nodes.forEach(node => {
+            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            
+            let shapeEl;
+            const s = node.size;
+
+            if (node.shape === 'circle') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                shapeEl.setAttribute('cx', node.x);
+                shapeEl.setAttribute('cy', node.y);
+                shapeEl.setAttribute('r', s);
+            } else if (node.shape === 'square') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                shapeEl.setAttribute('x', node.x - s);
+                shapeEl.setAttribute('y', node.y - s);
+                shapeEl.setAttribute('width', s * 2);
+                shapeEl.setAttribute('height', s * 2);
+                shapeEl.setAttribute('rx', 3);
+            } else if (node.shape === 'triangle') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                shapeEl.setAttribute('points', getRegularPolygonPoints(node.x, node.y, s, 3));
+            } else if (node.shape === 'pentagon') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                shapeEl.setAttribute('points', getRegularPolygonPoints(node.x, node.y, s, 5));
+            } else if (node.shape === 'hexagon') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                shapeEl.setAttribute('points', getRegularPolygonPoints(node.x, node.y, s, 6));
+            }
+
+            shapeEl.classList.add('node-shape');
+            shapeEl.style.fill = node.color;
+            shapeEl.dataset.nodeId = node.id;
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', node.x);
+            text.setAttribute('y', node.y);
+            text.classList.add('node-text');
+            text.textContent = node.id;
+
+            g.appendChild(shapeEl);
+            g.appendChild(text);
+            nodesGroup.appendChild(g);
+        });
+    }
+
+    function renderEdges() {
+        edgesGroup.innerHTML = '';
+
+        // 第一步：统计每个节点的入边（含双向边反向），计算进入角度
+        const incomingMap = {}; // nodeId -> [{edge, direction, angle}]
+        edges.forEach(edge => {
+            const u = getNodeById(edge.u);
+            const v = getNodeById(edge.v);
+            if (!u || !v) return;
+
+            // u -> v 方向
+            const angleUV = Math.atan2(v.y - u.y, v.x - u.x);
+            if (!incomingMap[edge.v]) incomingMap[edge.v] = [];
+            incomingMap[edge.v].push({ edge, direction: 'forward', angle: angleUV });
+
+            // 双向边 v -> u 方向
+            if (edge.bidirectional) {
+                const angleVU = Math.atan2(u.y - v.y, u.x - v.x);
+                if (!incomingMap[edge.u]) incomingMap[edge.u] = [];
+                incomingMap[edge.u].push({ edge, direction: 'backward', angle: angleVU });
+            }
+        });
+
+        // 第二步：对每个节点的入边按角度排序，分配切线偏移量
+        const endpointOffset = {}; // "edgeId_direction" -> {dx, dy}
+        const SPREAD = 10; // 相邻箭头在节点边缘的间距（像素）
+        Object.keys(incomingMap).forEach(nodeId => {
+            const list = incomingMap[nodeId];
+            if (list.length <= 1) return;
+            list.sort((a, b) => a.angle - b.angle);
+            const n = list.length;
+            list.forEach((item, i) => {
+                // 沿节点切线方向偏移，中心对称分布
+                const shift = (i - (n - 1) / 2) * SPREAD;
+                // 切线方向 = 角度 + 90度
+                const tx = Math.cos(item.angle + Math.PI / 2);
+                const ty = Math.sin(item.angle + Math.PI / 2);
+                const key = `${item.edge.id}_${item.direction}`;
+                endpointOffset[key] = { dx: tx * shift, dy: ty * shift };
+            });
+        });
+
+        // 第三步：渲染每条边，应用终点偏移
+        edges.forEach(edge => {
+            const u = getNodeById(edge.u);
+            const v = getNodeById(edge.v);
+            if (!u || !v) return;
+
+            const dx = v.x - u.x;
+            const dy = v.y - u.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const offset = Math.max(u.size, v.size) + ARROW_OFFSET;
+
+            // 起点（从u出发）
+            let x1 = u.x + dx * offset / len;
+            let y1 = u.y + dy * offset / len;
+            // 终点（指向v）
+            let x2 = v.x - dx * offset / len;
+            let y2 = v.y - dy * offset / len;
+
+            // 应用终点偏移（u->v 方向的终点在v上）
+            const fwdOffset = endpointOffset[`${edge.id}_forward`];
+            if (fwdOffset) {
+                x2 += fwdOffset.dx;
+                y2 += fwdOffset.dy;
+            }
+            // 双向边反向终点（v->u 方向的终点在u上）
+            if (edge.bidirectional) {
+                const bwdOffset = endpointOffset[`${edge.id}_backward`];
+                if (bwdOffset) {
+                    x1 += bwdOffset.dx;
+                    y1 += bwdOffset.dy;
+                }
+            }
+
+            let pathEl;
+            if (edge.type === '~' && edge.controlPoint) {
+                pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                pathEl.setAttribute('d', `M ${x1} ${y1} Q ${edge.controlPoint.x} ${edge.controlPoint.y} ${x2} ${y2}`);
+                pathEl.classList.add('edge-arc');
+            } else {
+                pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                pathEl.setAttribute('x1', x1);
+                pathEl.setAttribute('y1', y1);
+                pathEl.setAttribute('x2', x2);
+                pathEl.setAttribute('y2', y2);
+                pathEl.classList.add('edge-line');
+            }
+
+            pathEl.style.stroke = edge.color;
+            pathEl.dataset.edgeId = edge.id;
+
+            if (edge.bidirectional) {
+                pathEl.setAttribute('marker-start', 'url(#arrow-start-default)');
+                pathEl.setAttribute('marker-end', 'url(#arrow-default)');
+            } else {
+                pathEl.setAttribute('marker-end', 'url(#arrow-default)');
+            }
+
+            edgesGroup.appendChild(pathEl);
+        });
+    }
+
+    function renderControlPoints() {
+        controlPointsGroup.innerHTML = '';
+        if (currentTool !== 'select') return;
+
+        edges.forEach(edge => {
+            if (edge.type !== '~' || !edge.controlPoint) return;
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', edge.controlPoint.x);
+            circle.setAttribute('cy', edge.controlPoint.y);
+            circle.setAttribute('r', 5);
+            circle.classList.add('control-point');
+            circle.dataset.edgeId = edge.id;
+            controlPointsGroup.appendChild(circle);
+        });
+    }
+
+    function clearTempDraw() {
+        tempDrawGroup.innerHTML = '';
+    }
+
+    function updateTempDraw(x1, y1, x2, y2) {
+        tempDrawGroup.innerHTML = '';
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.classList.add('temp-draw-line');
+        tempDrawGroup.appendChild(line);
+    }
+
+    function bindEvents() {
+        svg.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        svg.addEventListener('contextmenu', onContextMenu);
+
+        document.addEventListener('mousedown', (e) => {
+            if (!e.target.closest('.context-menu') && 
+                !e.target.closest('.new-node-panel') &&
+                !e.target.closest('#graphSvg')) {
+                hideAllMenus();
+            }
+        });
+    }
+
+    function getSvgPoint(e) {
+        const rect = svg.getBoundingClientRect();
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    function getNodeAtPoint(x, y) {
+        for (let i = nodes.length - 1; i >= 0; i--) {
+            const node = nodes[i];
+            const dx = x - node.x;
+            const dy = y - node.y;
+            if (Math.sqrt(dx*dx + dy*dy) <= node.size) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    function onMouseDown(e) {
+        if (e.button !== 0) return;
+        hideAllMenus();
+
+        const point = getSvgPoint(e);
+        const target = e.target;
+
+        if (target.classList.contains('node-shape')) {
+            const nodeId = parseInt(target.dataset.nodeId);
+            const node = getNodeById(nodeId);
+
+            if (currentTool === 'select') {
+                // 记录关联弧线控制点与节点的相对偏移，拖动时保持自定义形状
+                const arcOffsets = [];
+                edges.forEach(edge => {
+                    if (edge.type === '~' && edge.controlPoint) {
+                        if (edge.u === nodeId || edge.v === nodeId) {
+                            arcOffsets.push({
+                                edge: edge,
+                                dx: edge.controlPoint.x - node.x,
+                                dy: edge.controlPoint.y - node.y
+                            });
+                        }
+                    }
+                });
+
+                dragging = {
+                    type: 'node',
+                    target: node,
+                    offsetX: point.x - node.x,
+                    offsetY: point.y - node.y,
+                    arcOffsets: arcOffsets
+                };
+            } else if (currentTool === 'draw') {
+                drawingTemp = { startNodeId: nodeId, startX: node.x, startY: node.y };
+                updateTempDraw(node.x, node.y, point.x, point.y);
+            }
+            return;
+        }
+
+        if (target.classList.contains('control-point')) {
+            const edgeId = parseInt(target.dataset.edgeId);
+            const edge = edges.find(e => e.id === edgeId);
+            dragging = {
+                type: 'control',
+                target: edge,
+                offsetX: point.x - edge.controlPoint.x,
+                offsetY: point.y - edge.controlPoint.y
+            };
+            return;
+        }
+
+        if (currentTool === 'select') {
+            clearHighlight();
+        }
+    }
+
+    function onMouseMove(e) {
+        const point = getSvgPoint(e);
+
+        if (dragging) {
+            if (dragging.type === 'node') {
+                dragging.target.x = point.x - dragging.offsetX;
+                dragging.target.y = point.y - dragging.offsetY;
+                
+                // 按偏移量同步更新关联弧线控制点，保持自定义弯曲形状
+                if (dragging.arcOffsets) {
+                    dragging.arcOffsets.forEach(item => {
+                        item.edge.controlPoint.x = dragging.target.x + item.dx;
+                        item.edge.controlPoint.y = dragging.target.y + item.dy;
+                    });
+                }
+            } else if (dragging.type === 'control') {
+                dragging.target.controlPoint.x = point.x - dragging.offsetX;
+                dragging.target.controlPoint.y = point.y - dragging.offsetY;
+            }
+            render();
+            return;
+        }
+
+        if (currentTool === 'draw' && drawingTemp) {
+            updateTempDraw(drawingTemp.startX, drawingTemp.startY, point.x, point.y);
+        }
+    }
+
+    function onMouseUp(e) {
+        const point = getSvgPoint(e);
+
+        if (dragging) {
+            dragging = null;
+            if (activeHighlightIndex >= 0) {
+                if (activeHighlightType === 'cycle') highlightCycle(activeHighlightIndex);
+                else if (activeHighlightType === 'path') highlightPath(activeHighlightIndex);
+            }
+            return;
+        }
+
+        if (currentTool === 'draw' && drawingTemp) {
+            const targetNode = getNodeAtPoint(point.x, point.y);
+            
+            if (targetNode && targetNode.id !== drawingTemp.startNodeId) {
+                const startId = drawingTemp.startNodeId;
+                const endId = targetNode.id;
+                setTimeout(() => {
+                    showEdgeTypeMenu(e.clientX, e.clientY, startId, endId);
+                }, 10);
+            } else if (!targetNode) {
+                const startId = drawingTemp.startNodeId;
+                const endX = point.x;
+                const endY = point.y;
+                setTimeout(() => {
+                    openNewNodePanel(e.clientX, e.clientY, (config) => {
+                        const newNode = addNode(endX, endY, config.color, config.shape);
+                        let type, bidir;
+                        if (config.edgeType === '-') { type = '-'; bidir = false; }
+                        else if (config.edgeType === '~') { type = '~'; bidir = false; }
+                        else if (config.edgeType === '=') { type = '-'; bidir = true; }
+                        else { type = '~'; bidir = true; }
+                        addEdgeById(startId, newNode.id, type, bidir);
+                        render();
+                    });
+                }, 10);
+            }
+
+            drawingTemp = null;
+            clearTempDraw();
+        }
+    }
+
+    function showEdgeTypeMenu(x, y, startId, endId) {
+        const items = [
+            { subtitle: '选择连线类型' },
+            { label: '单向直线', action: () => { addEdgeById(startId, endId, '-', false); render(); hideAllMenus(); } },
+            { label: '单向弧线', action: () => { addEdgeById(startId, endId, '~', false); render(); hideAllMenus(); } },
+            { label: '双向直线', action: () => { addEdgeById(startId, endId, '-', true); render(); hideAllMenus(); } },
+            { label: '双向弧线', action: () => { addEdgeById(startId, endId, '~', true); render(); hideAllMenus(); } }
+        ];
+        showContextMenu(x, y, items);
+    }
+
+    function onContextMenu(e) {
+        e.preventDefault();
+        const target = e.target;
+        let menuItems = [];
+        const point = getSvgPoint(e);
+
+        if (target.classList.contains('node-shape')) {
+            const id = parseInt(target.dataset.nodeId);
+            const node = getNodeById(id);
+            menuItems = [
+                { label: '修改颜色', action: () => changeNodeColor(id) },
+                { label: '修改大小', action: () => changeNodeSize(id) },
+                { subtitle: '节点形状' },
+                { label: '● 圆形', action: () => changeNodeShape(id, 'circle'), active: node.shape === 'circle' },
+                { label: '■ 方形', action: () => changeNodeShape(id, 'square'), active: node.shape === 'square' },
+                { label: '▲ 三角形', action: () => changeNodeShape(id, 'triangle'), active: node.shape === 'triangle' },
+                { label: '⬠ 五边形', action: () => changeNodeShape(id, 'pentagon'), active: node.shape === 'pentagon' },
+                { label: '⬡ 六边形', action: () => changeNodeShape(id, 'hexagon'), active: node.shape === 'hexagon' },
+                { label: '删除节点', danger: true, action: () => deleteNode(id) }
+            ];
+        } else if (target.classList.contains('edge-line') || target.classList.contains('edge-arc')) {
+            const id = parseInt(target.dataset.edgeId);
+            const edge = edges.find(e => e.id === id);
+            menuItems = [
+                { label: edge.type === '-' ? '转为弧线' : '转为直线', action: () => toggleEdgeShape(id) },
+                { label: edge.bidirectional ? '改为单向' : '改为双向', action: () => toggleEdgeDirection(id) },
+                { label: '修改颜色', action: () => changeEdgeColor(id) },
+                { label: '删除边', danger: true, action: () => deleteEdge(id) }
+            ];
+        } else {
+            menuItems = [
+                { 
+                    label: '在此处添加节点', 
+                    action: () => {
+                        addNode(point.x, point.y);
+                        hideAllMenus();
+                    }
+                }
+            ];
+        }
+
+        showContextMenu(e.clientX, e.clientY, menuItems);
+    }
+
+    function showContextMenu(x, y, items) {
+        contextMenu.innerHTML = '';
+        items.forEach(item => {
+            if (item.subtitle) {
+                const div = document.createElement('div');
+                div.className = 'menu-subtitle';
+                div.textContent = item.subtitle;
+                contextMenu.appendChild(div);
+                return;
+            }
+            const div = document.createElement('div');
+            div.className = 'menu-item' + (item.danger ? ' danger' : '');
+            div.textContent = item.label;
+            if (item.active) div.style.color = '#409eff';
+            div.onclick = item.action;
+            contextMenu.appendChild(div);
+        });
+
+        contextMenu.style.left = x + 'px';
+        contextMenu.style.top = y + 'px';
+        contextMenu.style.display = 'block';
+
+        const rect = contextMenu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) contextMenu.style.left = (x - rect.width) + 'px';
+        if (rect.bottom > window.innerHeight) contextMenu.style.top = (y - rect.height) + 'px';
+    }
+
+    function exportToText() {
+        const parts = [];
+        edges.forEach(e => {
+            let sep;
+            if (e.bidirectional) {
+                sep = e.type === '-' ? '=' : '~~';
+            } else {
+                sep = e.type;
+            }
+            parts.push(`${e.u}${sep}${e.v}`);
+        });
+        document.getElementById('importText').value = parts.join('，');
+    }
+
+    function importFromText() {
+        const text = document.getElementById('importText').value;
+        if (!text.trim()) return;
+
+        nodes = []; edges = [];
+        nextNodeId = 0; nextEdgeId = 0;
+
+        const list = text.split(/[，,\n\r]/).map(s => s.trim()).filter(s => s !== '');
+        const pattern = /^(\d+)(-|~|=|~~)(\d+)$/;
+        const nodeSet = new Set();
+        list.forEach(s => {
+            const m = s.match(pattern);
+            if (m) { nodeSet.add(+m[1]); nodeSet.add(+m[3]); }
+        });
+
+        const nodeArr = Array.from(nodeSet).sort((a,b) => a-b);
+        const rect = svg.getBoundingClientRect();
+        const cx = rect.width / 2, cy = rect.height / 2;
+        const radius = Math.min(cx, cy) * 0.7;
+
+        nodeArr.forEach((id, i) => {
+            const angle = -Math.PI/2 + i * 2 * Math.PI / nodeArr.length;
+            nodes.push({
+                id, x: cx + radius*Math.cos(angle), y: cy + radius*Math.sin(angle),
+                color: '#409eff', shape: 'circle', size: 18
+            });
+            if (id >= nextNodeId) nextNodeId = id + 1;
+        });
+
+        list.forEach(s => {
+            const m = s.match(pattern);
+            if (m) {
+                const u = +m[1], sep = m[2], v = +m[3];
+                let type, bidir;
+                if (sep === '-') { type='-'; bidir=false; }
+                else if (sep === '~') { type='~'; bidir=false; }
+                else if (sep === '=') { type='-'; bidir=true; }
+                else { type='~'; bidir=true; }
+                addEdgeById(u, v, type, bidir);
+            }
+        });
+
+        updatePathSelects();
+        render();
+    }
+
+    function buildCalcEdges() {
+        const res = [];
+        edges.forEach(e => {
+            res.push({ u: e.u, v: e.v, type: e.type, sourceId: e.id, direction: 'forward' });
+            if (e.bidirectional) {
+                res.push({ u: e.v, v: e.u, type: e.type, sourceId: e.id, direction: 'backward' });
+            }
+        });
+        return res;
+    }
+
+    function getCycleString(seq) {
+        let str = String(seq[0].u);
+        seq.forEach(e => str += e.type + e.v);
+        return str;
+    }
+
+    function getCanonical(seq) {
+        let best = null;
+        for (let r = 0; r < seq.length; r++) {
+            const rot = [];
+            for (let i = 0; i < seq.length; i++) rot.push(seq[(r+i) % seq.length]);
+            const s = getCycleString(rot);
+            if (best === null || s < best) best = s;
+        }
+        return best;
+    }
+
+    function calculateCycles() {
+        clearHighlight();
+        const calcEdges = buildCalcEdges();
+        if (calcEdges.length === 0) { alert('请先添加边'); return; }
+
+        const adj = {};
+        const allNodes = new Set();
+        calcEdges.forEach(e => {
+            if (!adj[e.u]) adj[e.u] = [];
+            adj[e.u].push(e);
+            allNodes.add(e.u); allNodes.add(e.v);
+        });
+
+        const cycleMap = new Map();
+        function search(start, current, pathNodes, pathEdges) {
+            (adj[current] || []).forEach(edge => {
+                if (edge.v === start) {
+                    if (pathEdges.length >= 1) {
+                        const fullSeq = [...pathEdges, edge];
+                        const canon = getCanonical(fullSeq);
+                        if (!cycleMap.has(canon)) {
+                            cycleMap.set(canon, fullSeq);
+                        }
+                    }
+                } else if (!pathNodes.has(edge.v)) {
+                    const newNodes = new Set(pathNodes);
+                    newNodes.add(edge.v);
+                    search(start, edge.v, newNodes, [...pathEdges, edge]);
+                }
+            });
+        }
+
+        allNodes.forEach(n => search(n, n, new Set([n]), []));
+        
+        const sortedKeys = Array.from(cycleMap.keys()).sort();
+        cycles = sortedKeys.map(key => ({ str: key, edges: cycleMap.get(key) }));
+
+        document.getElementById('cycleCount').textContent = cycles.length;
+        renderCycleList();
+    }
+
+    function renderCycleList() {
+        const list = document.getElementById('cycleList');
+        list.innerHTML = '';
+        cycles.forEach((c, i) => {
+            const item = document.createElement('div');
+            item.className = 'result-item';
+            item.textContent = `${i+1}. ${c.str}`;
+            item.onclick = () => highlightCycle(i);
+            list.appendChild(item);
+        });
+    }
+
+    function highlightCycle(index) {
+        clearHighlight();
+        activeHighlightType = 'cycle';
+        activeHighlightIndex = index;
+
+        const items = document.querySelectorAll('#cycleList .result-item');
+        items[index].style.color = '#e74c3c';
+        items[index].style.background = '#fef0f0';
+
+        const edgeSeq = cycles[index].edges;
+        const nodeSet = new Set();
+
+        edgeSeq.forEach(seg => {
+            const el = edgesGroup.querySelector(`[data-edge-id="${seg.sourceId}"]`);
+            if (el) {
+                el.classList.add('highlight-edge');
+                const edge = edges.find(e => e.id === seg.sourceId);
+                if (edge.bidirectional) {
+                    el.setAttribute('marker-start', 'url(#arrow-start-red)');
+                    el.setAttribute('marker-end', 'url(#arrow-red)');
+                } else {
+                    el.setAttribute('marker-end', 'url(#arrow-red)');
+                }
+            }
+            nodeSet.add(seg.u);
+            nodeSet.add(seg.v);
+        });
+
+        nodeSet.forEach(id => {
+            const el = nodesGroup.querySelector(`.node-shape[data-node-id="${id}"]`);
+            if (el) el.classList.add('highlight-node');
+        });
+
+        clearTimeout(highlightTimer);
+        highlightTimer = setTimeout(() => {
+            clearHighlight();
+        }, HIGHLIGHT_DURATION);
+    }
+
+    function calculatePaths() {
+        clearHighlight();
+        const start = +document.getElementById('pathStart').value;
+        const end = +document.getElementById('pathEnd').value;
+        if (start === end) { alert('起点和终点不能相同'); return; }
+
+        const calcEdges = buildCalcEdges();
+        const adj = {};
+        calcEdges.forEach(e => {
+            if (!adj[e.u]) adj[e.u] = [];
+            adj[e.u].push(e);
+        });
+
+        const pathList = [];
+        function dfs(current, pathNodes, pathEdges) {
+            if (current === end) {
+                let str = String(pathEdges[0].u);
+                pathEdges.forEach(e => str += e.type + e.v);
+                pathList.push({ str, edges: [...pathEdges] });
+                return;
+            }
+            (adj[current] || []).forEach(edge => {
+                if (!pathNodes.has(edge.v)) {
+                    const newNodes = new Set(pathNodes);
+                    newNodes.add(edge.v);
+                    dfs(edge.v, newNodes, [...pathEdges, edge]);
+                }
+            });
+        }
+        dfs(start, new Set([start]), []);
+
+        pathList.sort((a,b) => a.edges.length - b.edges.length);
+        paths = pathList;
+
+        document.getElementById('pathCount').textContent = paths.length;
+
+        if (paths.length > 0) {
+            const minLen = paths[0].edges.length;
+            const shortestPaths = paths.filter(p => p.edges.length === minLen);
+            
+            document.getElementById('shortestLen').textContent = minLen;
+            document.getElementById('shortestCount').textContent = shortestPaths.length;
+            
+            const shortList = document.getElementById('shortestList');
+            shortList.innerHTML = '';
+            shortestPaths.forEach((p, i) => {
+                const item = document.createElement('div');
+                item.className = 'result-item';
+                item.textContent = `${i+1}. ${p.str}`;
+                item.onclick = () => {
+                    const globalIndex = paths.indexOf(p);
+                    highlightPath(globalIndex);
+                };
+                shortList.appendChild(item);
+            });
+        } else {
+            document.getElementById('shortestLen').textContent = '-';
+            document.getElementById('shortestCount').textContent = '0';
+            document.getElementById('shortestList').innerHTML = '';
+        }
+
+        const list = document.getElementById('pathList');
+        list.innerHTML = '';
+        paths.forEach((p, i) => {
+            const item = document.createElement('div');
+            item.className = 'result-item';
+            item.textContent = `${i+1}. ${p.str}`;
+            item.onclick = () => highlightPath(i);
+            list.appendChild(item);
+        });
+    }
+
+    function highlightPath(index) {
+        clearHighlight();
+        activeHighlightType = 'path';
+        activeHighlightIndex = index;
+
+        const items = document.querySelectorAll('#pathList .result-item');
+        items[index].style.color = '#e74c3c';
+        items[index].style.background = '#fef0f0';
+
+        const edgeSeq = paths[index].edges;
+        const nodeSet = new Set();
+
+        edgeSeq.forEach(seg => {
+            const el = edgesGroup.querySelector(`[data-edge-id="${seg.sourceId}"]`);
+            if (el) {
+                el.classList.add('highlight-edge');
+                const edge = edges.find(e => e.id === seg.sourceId);
+                if (edge.bidirectional) {
+                    el.setAttribute('marker-start', 'url(#arrow-start-red)');
+                    el.setAttribute('marker-end', 'url(#arrow-red)');
+                } else {
+                    el.setAttribute('marker-end', 'url(#arrow-red)');
+                }
+            }
+            nodeSet.add(seg.u);
+            nodeSet.add(seg.v);
+        });
+
+        nodeSet.forEach(id => {
+            const el = nodesGroup.querySelector(`.node-shape[data-node-id="${id}"]`);
+            if (el) el.classList.add('highlight-node');
+        });
+
+        clearTimeout(highlightTimer);
+        highlightTimer = setTimeout(() => {
+            clearHighlight();
+        }, HIGHLIGHT_DURATION);
+    }
+
+    function clearHighlight() {
+        clearTimeout(highlightTimer);
+        highlightTimer = null;
+
+        document.querySelectorAll('.highlight-edge').forEach(el => {
+            el.classList.remove('highlight-edge');
+            const id = parseInt(el.dataset.edgeId);
+            const edge = edges.find(e => e.id === id);
+            if (edge.bidirectional) {
+                el.setAttribute('marker-start', 'url(#arrow-start-default)');
+                el.setAttribute('marker-end', 'url(#arrow-default)');
+            } else {
+                el.setAttribute('marker-end', 'url(#arrow-default)');
+            }
+        });
+        document.querySelectorAll('.highlight-node').forEach(el => el.classList.remove('highlight-node'));
+        document.querySelectorAll('#cycleList .result-item').forEach(el => {
+            el.style.color = ''; el.style.background = '';
+        });
+        document.querySelectorAll('#pathList .result-item').forEach(el => {
+            el.style.color = ''; el.style.background = '';
+        });
+        document.querySelectorAll('#shortestList .result-item').forEach(el => {
+            el.style.color = ''; el.style.background = '';
+        });
+
+        activeHighlightType = null;
+        activeHighlightIndex = -1;
+    }
+
+    function sampleQuadratic(p0, p1, p2, steps) {
+        const points = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = (1-t)*(1-t)*p0.x + 2*(1-t)*t*p1.x + t*t*p2.x;
+            const y = (1-t)*(1-t)*p0.y + 2*(1-t)*t*p1.y + t*t*p2.y;
+            points.push({ x, y });
+        }
+        return points;
+    }
+
+    function segIntersect(a1, a2, b1, b2) {
+        const eps = 1e-6;
+        const cross = (x1,y1,x2,y2) => x1*y2 - x2*y1;
+
+        const share = 
+            (Math.abs(a1.x-b1.x)<eps && Math.abs(a1.y-b1.y)<eps) ||
+            (Math.abs(a1.x-b2.x)<eps && Math.abs(a1.y-b2.y)<eps) ||
+            (Math.abs(a2.x-b1.x)<eps && Math.abs(a2.y-b1.y)<eps) ||
+            (Math.abs(a2.x-b2.x)<eps && Math.abs(a2.y-b2.y)<eps);
+        if (share) return false;
+
+        const d1 = cross(b2.x-b1.x, b2.y-b1.y, a1.x-b1.x, a1.y-b1.y);
+        const d2 = cross(b2.x-b1.x, b2.y-b1.y, a2.x-b1.x, a2.y-b1.y);
+        const d3 = cross(a2.x-a1.x, a2.y-a1.y, b1.x-a1.x, b1.y-a1.y);
+        const d4 = cross(a2.x-a1.x, a2.y-a1.y, b2.x-a1.x, b2.y-a1.y);
+
+        return ((d1>eps && d2<-eps) || (d1<-eps && d2>eps)) &&
+               ((d3>eps && d4<-eps) || (d3<-eps && d4>eps));
+    }
+
+    function getEdgeSegments(edge) {
+        const u = getNodeById(edge.u);
+        const v = getNodeById(edge.v);
+        if (!u || !v) return [];
+
+        const dx = v.x - u.x;
+        const dy = v.y - u.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const offset = Math.max(u.size, v.size) + ARROW_OFFSET;
+        const x1 = u.x + dx * offset / len;
+        const y1 = u.y + dy * offset / len;
+        const x2 = v.x - dx * offset / len;
+        const y2 = v.y - dy * offset / len;
+
+        if (edge.type === '-' || !edge.controlPoint) {
+            return [{ p1: {x:x1,y:y1}, p2: {x:x2,y:y2} }];
+        } else {
+            const samples = sampleQuadratic(
+                {x:x1, y:y1},
+                edge.controlPoint,
+                {x:x2, y:y2},
+                ARC_SAMPLE_STEPS
+            );
+            const segs = [];
+            for (let i = 0; i < samples.length - 1; i++) {
+                segs.push({ p1: samples[i], p2: samples[i+1] });
+            }
+            return segs;
+        }
+    }
+
+    function calculateIntersections() {
+        const type = document.querySelector('input[name="interType"]:checked').value;
+        
+        const lineEdges = [];
+        const arcEdges = [];
+        edges.forEach(e => {
+            if (e.type === '-') lineEdges.push(e);
+            else arcEdges.push(e);
+        });
+
+        let count = 0;
+
+        if (type === 'all' || type === 'line-line') {
+            const lineSegs = lineEdges.map(e => getEdgeSegments(e)[0]);
+            for (let i = 0; i < lineSegs.length; i++) {
+                for (let j = i + 1; j < lineSegs.length; j++) {
+                    if (segIntersect(lineSegs[i].p1, lineSegs[i].p2, lineSegs[j].p1, lineSegs[j].p2)) {
+                        count++;
+                    }
+                }
+            }
+        }
+
+        if (type === 'all' || type === 'line-arc') {
+            const lineSegs = lineEdges.map(e => getEdgeSegments(e)[0]);
+            arcEdges.forEach(arc => {
+                const arcSegs = getEdgeSegments(arc);
+                lineSegs.forEach(ls => {
+                    for (let i = 0; i < arcSegs.length; i++) {
+                        if (segIntersect(ls.p1, ls.p2, arcSegs[i].p1, arcSegs[i].p2)) {
+                            count++;
+                            break;
+                        }
+                    }
+                });
+            });
+        }
+
+        if (type === 'all' || type === 'arc-arc') {
+            const allArcSegs = arcEdges.map(e => ({ edge: e, segs: getEdgeSegments(e) }));
+            for (let i = 0; i < allArcSegs.length; i++) {
+                for (let j = i + 1; j < allArcSegs.length; j++) {
+                    let hasInter = false;
+                    const segsA = allArcSegs[i].segs;
+                    const segsB = allArcSegs[j].segs;
+                    for (let a = 0; a < segsA.length && !hasInter; a++) {
+                        for (let b = 0; b < segsB.length && !hasInter; b++) {
+                            if (segIntersect(segsA[a].p1, segsA[a].p2, segsB[b].p1, segsB[b].p2)) {
+                                hasInter = true;
+                                count++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        document.getElementById('intersectionCount').textContent = count;
+    }
+
+    function clearAll() {
+        if (!confirm('确定清空所有内容吗？')) return;
+        nodes = []; edges = []; cycles = []; paths = [];
+        nextNodeId = 0; nextEdgeId = 0;
+        activeHighlightType = null;
+        activeHighlightIndex = -1;
+        clearTimeout(highlightTimer);
+        ['cycleCount','pathCount','shortestCount','intersectionCount'].forEach(id => document.getElementById(id).textContent = '0');
+        document.getElementById('shortestLen').textContent = '-';
+        ['cycleList','pathList','shortestList'].forEach(id => document.getElementById(id).innerHTML = '');
+        document.getElementById('importText').value = '';
+        updatePathSelects();
+        render();
+    }
+
+    init();
+</script>
+</body>
+</html>
