@@ -383,6 +383,58 @@
         <div class="panel-title">可视化拓扑构建/分析工具</div>
 
         <div class="card">
+            <div class="card-title">🎲 随机生成拓扑</div>
+
+            <div class="radio-group">
+                <label class="radio-label"><input type="radio" name="randMode" value="fixed" checked onchange="toggleRandMode()"> 指定数量</label>
+                <label class="radio-label"><input type="radio" name="randMode" value="range" onchange="toggleRandMode()"> 完全随机</label>
+            </div>
+
+            <div class="form-row" id="randFixedRow">
+                <div class="form-item">
+                    <label>节点数量</label>
+                    <input type="number" id="randNodeCount" min="2" max="60" value="8">
+                </div>
+                <div class="form-item">
+                    <label>连线数量</label>
+                    <input type="number" id="randEdgeCount" min="0" value="10">
+                </div>
+            </div>
+
+            <div class="form-row" id="randNodeRangeRow" style="display:none;">
+                <div class="form-item">
+                    <label>节点数范围（最少 ~ 最多）</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="number" id="randNodeMin" min="2" max="60" value="6">
+                        <input type="number" id="randNodeMax" min="2" max="60" value="12">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row" id="randEdgeRangeRow" style="display:none;">
+                <div class="form-item">
+                    <label>连线数范围（最少 ~ 最多）</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="number" id="randEdgeMin" min="0" value="4">
+                        <input type="number" id="randEdgeMax" min="0" value="15">
+                    </div>
+                </div>
+            </div>
+
+            <div class="radio-group" style="margin-bottom:0;">
+                <label class="radio-label"><input type="checkbox" id="randShape" checked> 随机形状</label>
+                <label class="radio-label"><input type="checkbox" id="randColor" checked> 随机颜色</label>
+                <label class="radio-label"><input type="checkbox" id="randSize" checked> 随机大小</label>
+                <label class="radio-label"><input type="checkbox" id="randEdgeType" checked> 随机连线</label>
+            </div>
+
+            <div class="form-row" style="margin-top:8px;margin-bottom:0;">
+                <button class="btn" onclick="generateRandomTopology()">🎲 立即生成</button>
+            </div>
+            <div class="tip">完全随机：节点/连线数量在范围内随机选取。连线数上限 = 节点数 ×（节点数-1），超限自动截断。</div>
+        </div>
+
+        <div class="card">
             <div class="card-title">数据导入导出</div>
             <textarea id="importText" placeholder="格式示例：0-1，0~1，0=2，1~~3"></textarea>
             <div class="form-row" style="margin-top: 8px;">
@@ -1587,19 +1639,172 @@
         document.getElementById('intersectionCount').textContent = count;
     }
 
-    function clearAll() {
-        if (!confirm('确定清空所有内容吗？')) return;
+    // ===== 随机拓扑生成 =====
+    const NODE_SHAPES = ['circle', 'square', 'triangle', 'pentagon', 'hexagon'];
+    const NODE_COLORS = [
+        '#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#9b59b6',
+        '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#1abc9c',
+        '#8e44ad', '#e67e22', '#27ae60', '#2980b9', '#c0392b',
+        '#16a085', '#d35400', '#7f8c8d', '#34495e', '#2c3e50'
+    ];
+
+    function randInt(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function shuffleArray(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+    }
+
+    function clampNum(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    function readNum(id, fallback) {
+        const v = Math.floor(Number(document.getElementById(id).value));
+        return Number.isFinite(v) ? v : fallback;
+    }
+
+    function toggleRandMode() {
+        const isRange = document.querySelector('input[name="randMode"]:checked').value === 'range';
+        document.getElementById('randFixedRow').style.display = isRange ? 'none' : 'flex';
+        document.getElementById('randNodeRangeRow').style.display = isRange ? 'flex' : 'none';
+        document.getElementById('randEdgeRangeRow').style.display = isRange ? 'flex' : 'none';
+    }
+
+    // 将节点散布在画布网格中并加入随机抖动，避免大量重叠
+    function computeGridPositions(count, rect) {
+        const margin = 70;
+        const w = Math.max(200, rect.width - margin * 2);
+        const h = Math.max(150, rect.height - margin * 2);
+        const cols = Math.ceil(Math.sqrt(count * w / h));
+        const rows = Math.ceil(count / cols);
+        const cellW = w / cols;
+        const cellH = h / rows;
+        const positions = [];
+        for (let i = 0; i < count; i++) {
+            const c = i % cols;
+            const r = Math.floor(i / cols);
+            positions.push({
+                x: margin + (c + 0.5) * cellW + (Math.random() - 0.5) * cellW * 0.6,
+                y: margin + (r + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.6
+            });
+        }
+        return shuffleArray(positions);
+    }
+
+    // 生成随机无向节点对：先构造随机生成树保证连通，再补充剩余边（避免同对重复）
+    function buildRandomEdges(n, m) {
+        const used = new Set();
+        const specs = [];
+        function tryAdd(u, v) {
+            if (u === v) return false;
+            const key = u < v ? u + '|' + v : v + '|' + u;
+            if (used.has(key)) return false;
+            used.add(key);
+            return true;
+        }
+
+        if (m >= n - 1 && n > 1) {
+            const order = shuffleArray([...Array(n).keys()]);
+            for (let i = 1; i < n; i++) {
+                const u = order[i];
+                const v = order[randInt(0, i - 1)];
+                tryAdd(u, v);
+                specs.push({ u, v });
+            }
+        }
+
+        let guard = 0;
+        while (specs.length < m && guard < m * 30 + 200) {
+            guard++;
+            const u = randInt(0, n - 1);
+            const v = randInt(0, n - 1);
+            if (tryAdd(u, v)) specs.push({ u, v });
+        }
+        return specs;
+    }
+
+    function generateRandomTopology() {
+        const rect = svg.getBoundingClientRect();
+        const mode = document.querySelector('input[name="randMode"]:checked').value;
+
+        let n, m;
+        if (mode === 'fixed') {
+            n = clampNum(readNum('randNodeCount', 8), 2, 60);
+            m = clampNum(readNum('randEdgeCount', 0), 0, n * (n - 1));
+        } else {
+            let nMin = clampNum(readNum('randNodeMin', 6), 2, 60);
+            let nMax = clampNum(readNum('randNodeMax', 12), 2, 60);
+            if (nMin > nMax) [nMin, nMax] = [nMax, nMin];
+            n = randInt(nMin, nMax);
+
+            const maxM = n * (n - 1);
+            let mMin = clampNum(readNum('randEdgeMin', 4), 0, maxM);
+            let mMax = clampNum(readNum('randEdgeMax', 15), 0, maxM);
+            if (mMin > mMax) mMin = mMax;
+            m = randInt(mMin, mMax);
+        }
+        if (m > n * (n - 1)) m = n * (n - 1);
+
+        const msg = `将清空当前画布，随机生成 ${n} 个节点、${m} 条连线。\n是否继续？`;
+        if (nodes.length > 0 && !confirm(msg)) return;
+
+        const randShape = document.getElementById('randShape').checked;
+        const randColor = document.getElementById('randColor').checked;
+        const randSize = document.getElementById('randSize').checked;
+        const randEdge = document.getElementById('randEdgeType').checked;
+
+        resetAll();
+
+        const positions = computeGridPositions(n, rect);
+        for (let i = 0; i < n; i++) {
+            const p = positions[i];
+            nodes.push({
+                id: nextNodeId++,
+                x: p.x, y: p.y,
+                color: randColor ? NODE_COLORS[randInt(0, NODE_COLORS.length - 1)] : '#409eff',
+                shape: randShape ? NODE_SHAPES[randInt(0, NODE_SHAPES.length - 1)] : 'circle',
+                size: randSize ? randInt(13, 26) : 18
+            });
+        }
+
+        buildRandomEdges(n, m).forEach(s => {
+            let type = '-', bidir = false;
+            if (randEdge) {
+                const r = randInt(0, 3);
+                type = r < 2 ? '-' : '~';
+                bidir = r % 2 === 1;
+            }
+            addEdgeById(s.u, s.v, type, bidir);
+        });
+
+        updatePathSelects();
+        render();
+    }
+
+    function resetAll() {
         nodes = []; edges = []; cycles = []; paths = [];
         nextNodeId = 0; nextEdgeId = 0;
         activeHighlightType = null;
         activeHighlightIndex = -1;
         clearTimeout(highlightTimer);
+        highlightTimer = null;
         ['cycleCount','pathCount','shortestCount','intersectionCount'].forEach(id => document.getElementById(id).textContent = '0');
         document.getElementById('shortestLen').textContent = '-';
         ['cycleList','pathList','shortestList'].forEach(id => document.getElementById(id).innerHTML = '');
         document.getElementById('importText').value = '';
         updatePathSelects();
         render();
+    }
+
+    function clearAll() {
+        if (!confirm('确定清空所有内容吗？')) return;
+        resetAll();
     }
 
     init();
