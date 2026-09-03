@@ -373,6 +373,10 @@
             <button class="tool-btn" onclick="addNode()">
                 <span>➕</span> 添加节点
             </button>
+            <div class="tool-divider"></div>
+            <button class="tool-btn" onclick="layoutGraph()">
+                <span>🧲</span> 自动布局
+            </button>
             <button class="tool-btn" onclick="clearAll()">
                 <span>🗑</span> 清空画布
             </button>
@@ -563,6 +567,58 @@
             points.push(`${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`);
         }
         return points.join(' ');
+    }
+
+    // 计算从节点中心沿 angle 方向到形状边缘的实际距离（与渲染的几何一致）
+    function getShapeBoundaryRadius(shape, size, angle) {
+        if (shape === 'circle') return size;
+        if (shape === 'square') {
+            // 圆角方形，近似按轴对齐方形处理
+            const c = Math.abs(Math.cos(angle));
+            const s = Math.abs(Math.sin(angle));
+            return size / Math.max(c, s, 1e-6);
+        }
+        let sides;
+        if (shape === 'triangle') sides = 3;
+        else if (shape === 'pentagon') sides = 5;
+        else if (shape === 'hexagon') sides = 6;
+        else return size;
+
+        // 正多边形：外接圆半径 = size，边心距 = size*cos(pi/n)
+        // 多边形每条边外法线角（首顶点在正上方，与 getRegularPolygonPoints 一致）
+        const apothem = size * Math.cos(Math.PI / sides);
+        const step = 2 * Math.PI / sides;
+        let best = -Math.PI / 2 + step / 2;
+        let bestDiff = Infinity;
+        for (let i = 0; i < sides; i++) {
+            const beta = -Math.PI / 2 + (2 * i + 1) * step / 2;
+            let diff = angle - beta;
+            while (diff > Math.PI) diff -= 2 * Math.PI;
+            while (diff < -Math.PI) diff += 2 * Math.PI;
+            const ad = Math.abs(diff);
+            if (ad < bestDiff) { bestDiff = ad; best = beta; }
+        }
+        let delta = angle - best;
+        while (delta > Math.PI) delta -= 2 * Math.PI;
+        while (delta < -Math.PI) delta += 2 * Math.PI;
+        return apothem / Math.cos(delta);
+    }
+
+    // 精确计算边两端点：分别按两端节点自身形状/大小取边界半径，
+    // 避免大小、形状不同的节点导致箭头悬空或穿透节点
+    function computeBaseEdgeEndpoints(u, v) {
+        const dx = v.x - u.x;
+        const dy = v.y - u.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const aUV = Math.atan2(dy, dx);
+        const rU = getShapeBoundaryRadius(u.shape, u.size, aUV) + ARROW_OFFSET;
+        const rV = getShapeBoundaryRadius(v.shape, v.size, aUV + Math.PI) + ARROW_OFFSET;
+        return {
+            x1: u.x + dx * rU / len,
+            y1: u.y + dy * rU / len,
+            x2: v.x - dx * rV / len,
+            y2: v.y - dy * rV / len
+        };
     }
 
     function init() {
@@ -822,76 +878,74 @@
     function renderEdges() {
         edgesGroup.innerHTML = '';
 
-        // 第一步：统计每个节点的入边（含双向边反向），计算进入角度
-        const incomingMap = {}; // nodeId -> [{edge, direction, angle}]
+        // 第一步：统计每个节点上的所有箭头落点（含双向边两端），记录入射角
+        const incomingMap = {}; // nodeId -> [{edge, direction, hubId, angle}]
         edges.forEach(edge => {
             const u = getNodeById(edge.u);
             const v = getNodeById(edge.v);
             if (!u || !v) return;
 
-            // u -> v 方向
+            // u -> v 方向（箭头落在 v 上）
             const angleUV = Math.atan2(v.y - u.y, v.x - u.x);
-            if (!incomingMap[edge.v]) incomingMap[edge.v] = [];
-            incomingMap[edge.v].push({ edge, direction: 'forward', angle: angleUV });
+            if (!incomingMap[v.id]) incomingMap[v.id] = [];
+            incomingMap[v.id].push({ edge, direction: 'forward', hubId: v.id, angle: angleUV });
 
-            // 双向边 v -> u 方向
+            // 双向边 v -> u 方向（箭头落在 u 上）
             if (edge.bidirectional) {
                 const angleVU = Math.atan2(u.y - v.y, u.x - v.x);
-                if (!incomingMap[edge.u]) incomingMap[edge.u] = [];
-                incomingMap[edge.u].push({ edge, direction: 'backward', angle: angleVU });
+                if (!incomingMap[u.id]) incomingMap[u.id] = [];
+                incomingMap[u.id].push({ edge, direction: 'backward', hubId: u.id, angle: angleVU });
             }
         });
 
-        // 第二步：对每个节点的入边按角度排序，分配切线偏移量
-        const endpointOffset = {}; // "edgeId_direction" -> {dx, dy}
-        const SPREAD = 10; // 相邻箭头在节点边缘的间距（像素）
+        // 第二步：把每个节点的箭头沿“节点边缘”扇形排布。
+        // 与原切线平移不同，落点始终保持在节点边界环上，因此不会偏移出节点范围；
+        // 相邻箭头按约 12px 弧距错开并限制最大偏转 60°，避免箭头互相重叠。
+        const landingPoint = {}; // "edgeId_direction" -> {x, y}
+        const FAN_STEP = 12;     // 相邻箭头在节点边缘的最小弧距（像素）
+        const FAN_MAX_DELTA = Math.PI / 3; // 最大偏转角度 ±60°
         Object.keys(incomingMap).forEach(nodeId => {
+            const hub = getNodeById(+nodeId);
+            if (!hub) return;
             const list = incomingMap[nodeId];
-            if (list.length <= 1) return;
             list.sort((a, b) => a.angle - b.angle);
             const n = list.length;
             list.forEach((item, i) => {
-                // 沿节点切线方向偏移，中心对称分布
-                const shift = (i - (n - 1) / 2) * SPREAD;
-                // 切线方向 = 角度 + 90度
-                const tx = Math.cos(item.angle + Math.PI / 2);
-                const ty = Math.sin(item.angle + Math.PI / 2);
-                const key = `${item.edge.id}_${item.direction}`;
-                endpointOffset[key] = { dx: tx * shift, dy: ty * shift };
+                // 从节点中心指向“来箭方向”的落点基准角（入射角反向）
+                const aIn = item.angle + Math.PI;
+                const rb = getShapeBoundaryRadius(hub.shape, hub.size, aIn);
+                // 弧长 -> 圆心角：delta = 弧长 / 边界半径
+                let delta = 0;
+                if (n > 1) {
+                    const arc = (i - (n - 1) / 2) * FAN_STEP;
+                    delta = arc / Math.max(rb, 1);
+                    delta = Math.max(-FAN_MAX_DELTA, Math.min(FAN_MAX_DELTA, delta));
+                }
+                const ang = aIn + delta;
+                // 落点半径需按最终角度再求一次边界，保证箭头始终紧贴实际边缘
+                const rbAng = getShapeBoundaryRadius(hub.shape, hub.size, ang);
+                landingPoint[`${item.edge.id}_${item.direction}`] = {
+                    x: hub.x + Math.cos(ang) * (rbAng + ARROW_OFFSET),
+                    y: hub.y + Math.sin(ang) * (rbAng + ARROW_OFFSET)
+                };
             });
         });
 
-        // 第三步：渲染每条边，应用终点偏移
+        // 第三步：渲染每条边，应用按形状精确计算的端点与扇形落点
         edges.forEach(edge => {
             const u = getNodeById(edge.u);
             const v = getNodeById(edge.v);
             if (!u || !v) return;
 
-            const dx = v.x - u.x;
-            const dy = v.y - u.y;
-            const len = Math.sqrt(dx * dx + dy * dy) || 1;
-            const offset = Math.max(u.size, v.size) + ARROW_OFFSET;
+            const base = computeBaseEdgeEndpoints(u, v);
+            let x1 = base.x1, y1 = base.y1;
+            let x2 = base.x2, y2 = base.y2;
 
-            // 起点（从u出发）
-            let x1 = u.x + dx * offset / len;
-            let y1 = u.y + dy * offset / len;
-            // 终点（指向v）
-            let x2 = v.x - dx * offset / len;
-            let y2 = v.y - dy * offset / len;
-
-            // 应用终点偏移（u->v 方向的终点在v上）
-            const fwdOffset = endpointOffset[`${edge.id}_forward`];
-            if (fwdOffset) {
-                x2 += fwdOffset.dx;
-                y2 += fwdOffset.dy;
-            }
-            // 双向边反向终点（v->u 方向的终点在u上）
+            const fwd = landingPoint[`${edge.id}_forward`];
+            if (fwd) { x2 = fwd.x; y2 = fwd.y; }
             if (edge.bidirectional) {
-                const bwdOffset = endpointOffset[`${edge.id}_backward`];
-                if (bwdOffset) {
-                    x1 += bwdOffset.dx;
-                    y1 += bwdOffset.dy;
-                }
+                const bwd = landingPoint[`${edge.id}_backward`];
+                if (bwd) { x1 = bwd.x; y1 = bwd.y; }
             }
 
             let pathEl;
@@ -1553,14 +1607,9 @@
         const v = getNodeById(edge.v);
         if (!u || !v) return [];
 
-        const dx = v.x - u.x;
-        const dy = v.y - u.y;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        const offset = Math.max(u.size, v.size) + ARROW_OFFSET;
-        const x1 = u.x + dx * offset / len;
-        const y1 = u.y + dy * offset / len;
-        const x2 = v.x - dx * offset / len;
-        const y2 = v.y - dy * offset / len;
+        const base = computeBaseEdgeEndpoints(u, v);
+        const x1 = base.x1, y1 = base.y1;
+        const x2 = base.x2, y2 = base.y2;
 
         if (edge.type === '-' || !edge.controlPoint) {
             return [{ p1: {x:x1,y:y1}, p2: {x:x2,y:y2} }];
@@ -1637,6 +1686,122 @@
         }
 
         document.getElementById('intersectionCount').textContent = count;
+    }
+
+    // ===== 力导向自动布局 =====
+    // 节点间斥力 + 边引力迭代收敛，降低边交叉与节点重叠，让箭头指向更清晰
+    function applyForceLayout(iterations) {
+        iterations = iterations || 300;
+        const n = nodes.length;
+        if (n < 2) return;
+
+        const rect = svg.getBoundingClientRect();
+        const w = Math.max(320, rect.width || 800);
+        const h = Math.max(240, rect.height || 600);
+        const margin = 80;
+
+        // 保存弧线控制点相对两端节点的几何参数（沿边比例 + 法向高度），布局后按新位置还原
+        const arcSnap = [];
+        edges.forEach(edge => {
+            if (edge.type !== '~' || !edge.controlPoint) return;
+            const u = getNodeById(edge.u);
+            const v = getNodeById(edge.v);
+            const cp = edge.controlPoint;
+            const dx = v.x - u.x;
+            const dy = v.y - u.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const ex = dx / len, ey = dy / len;
+            const nx = -ey, ny = ex;
+            const along = (cp.x - u.x) * ex + (cp.y - u.y) * ey;
+            const height = (cp.x - (u.x + ex * along)) * nx + (cp.y - (u.y + ey * along)) * ny;
+            arcSnap.push({ edge, t: clampNum(along / len, 0, 1), height });
+        });
+
+        // 理想边长与初始温度（Fruchterman-Reingold）
+        const k = Math.sqrt((w - 2 * margin) * (h - 2 * margin) / Math.max(n, 1)) * 0.85;
+        let temp = Math.min(w, h) / 5;
+        const cooling = Math.pow(0.08 / Math.max(temp, 0.01), 1 / iterations);
+
+        // 无向去重边表（平行边只计算一次引力）
+        const seen = new Set();
+        const links = [];
+        edges.forEach(e => {
+            const key = e.u < e.v ? e.u + '_' + e.v : e.v + '_' + e.u;
+            if (!seen.has(key)) { seen.add(key); links.push([e.u, e.v]); }
+        });
+
+        for (let it = 0; it < iterations; it++) {
+            const disp = [];
+            for (let i = 0; i < n; i++) disp.push({ x: 0, y: 0 });
+
+            // 斥力（库仑式）
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    let dx = nodes[j].x - nodes[i].x;
+                    let dy = nodes[j].y - nodes[i].y;
+                    let d = Math.sqrt(dx * dx + dy * dy);
+                    if (d < 1) {
+                        dx = (Math.random() - 0.5) * 2;
+                        dy = (Math.random() - 0.5) * 2;
+                        d = Math.sqrt(dx * dx + dy * dy) || 1;
+                    }
+                    const f = k * k / d;
+                    const fx = dx / d * f;
+                    const fy = dy / d * f;
+                    disp[i].x -= fx; disp[i].y -= fy;
+                    disp[j].x += fx; disp[j].y += fy;
+                }
+            }
+
+            // 引力（弹簧式）
+            links.forEach(link => {
+                const a = nodes[link[0]];
+                const b = nodes[link[1]];
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const d = Math.sqrt(dx * dx + dy * dy) || 1;
+                const f = d * d / k;
+                const fx = dx / d * f;
+                const fy = dy / d * f;
+                disp[link[0]].x += fx; disp[link[0]].y += fy;
+                disp[link[1]].x -= fx; disp[link[1]].y -= fy;
+            });
+
+            // 限制最大位移并约束在画布内
+            for (let i = 0; i < n; i++) {
+                let dx = disp[i].x;
+                let dy = disp[i].y;
+                const dl = Math.sqrt(dx * dx + dy * dy);
+                if (dl > temp) { dx = dx / dl * temp; dy = dy / dl * temp; }
+                nodes[i].x = Math.max(margin, Math.min(w - margin, nodes[i].x + dx));
+                nodes[i].y = Math.max(margin, Math.min(h - margin, nodes[i].y + dy));
+            }
+            temp *= cooling;
+        }
+
+        // 还原弧线控制点：两端已移动，按保存的比例/高度重建，保持弧度形状
+        arcSnap.forEach(s => {
+            const u = getNodeById(s.edge.u);
+            const v = getNodeById(s.edge.v);
+            const dx = v.x - u.x;
+            const dy = v.y - u.y;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const ex = dx / len, ey = dy / len;
+            const nx = -ey, ny = ex;
+            const along = s.t * len;
+            s.edge.controlPoint = {
+                x: u.x + ex * along + nx * s.height,
+                y: u.y + ey * along + ny * s.height
+            };
+        });
+    }
+
+    // 工具栏“自动布局”入口：对当前画布所有节点重新布局
+    function layoutGraph() {
+        if (nodes.length === 0) return;
+        hideAllMenus();
+        applyForceLayout(320);
+        render();
     }
 
     // ===== 随机拓扑生成 =====
@@ -1783,6 +1948,8 @@
             addEdgeById(s.u, s.v, type, bidir);
         });
 
+        // 力导向布局让节点均匀铺开、减少边交叉，随后按精确边界渲染箭头
+        applyForceLayout(320);
         updatePathSelects();
         render();
     }
