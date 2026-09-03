@@ -33,8 +33,10 @@
         #graphSvg {
             width: 100%;
             height: 100%;
-            cursor: default;
+            cursor: grab;
+            touch-action: none;
         }
+        #graphSvg.panning { cursor: grabbing; }
 
         .toolbar {
             height: 56px;
@@ -335,12 +337,17 @@
             fill: #e74c3c !important;
         }
 
-        /* 画布右上角：弧线自动优化开关 */
-        .arc-opt-bar {
+        /* 画布右上角：视图工具（自动优化弧线开关 + 复位视图） */
+        .canvas-corner-controls {
             position: absolute;
             top: 10px;
             right: 12px;
             z-index: 50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .arc-opt-bar {
             background: rgba(255,255,255,0.92);
             border: 1px solid #e4e7ed;
             border-radius: 16px;
@@ -379,6 +386,19 @@
         .arc-opt-bar input:checked + .arc-opt-track { background: #409eff; }
         .arc-opt-bar input:checked + .arc-opt-track::after { left: 16px; }
         .arc-opt-bar:hover { border-color: #409eff; }
+        .view-reset-btn {
+            height: 26px;
+            padding: 0 10px;
+            border: 1px solid #e4e7ed;
+            border-radius: 13px;
+            background: rgba(255,255,255,0.92);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            font-size: 12px;
+            color: #606266;
+            cursor: pointer;
+            user-select: none;
+        }
+        .view-reset-btn:hover { border-color: #409eff; color: #409eff; }
     </style>
 </head>
 <body>
@@ -400,16 +420,21 @@
                         <polygon points="10 0, 0 5, 10 10" fill="#e74c3c"/>
                     </marker>
                 </defs>
-                <g id="edgesGroup"></g>
-                <g id="nodesGroup"></g>
-                <g id="controlPointsGroup"></g>
-                <g id="tempDrawGroup"></g>
+                <g id="viewportGroup">
+                    <g id="edgesGroup"></g>
+                    <g id="nodesGroup"></g>
+                    <g id="controlPointsGroup"></g>
+                    <g id="tempDrawGroup"></g>
+                </g>
             </svg>
-            <label class="arc-opt-bar" title="开启后：随机生成、拖拽节点、自动布局、新增弧线时自动优化弧线弯曲（手动拖过控制点的弧线除外）">
-                <input type="checkbox" id="arcAutoCb" onchange="onArcAutoChange()">
-                <span class="arc-opt-track"></span>
-                <span>自动优化弧线</span>
-            </label>
+            <div class="canvas-corner-controls">
+                <label class="arc-opt-bar" title="开启后：随机生成、拖拽节点、自动布局、新增弧线时自动优化弧线弯曲（手动拖过控制点的弧线除外）">
+                    <input type="checkbox" id="arcAutoCb" onchange="onArcAutoChange()">
+                    <span class="arc-opt-track"></span>
+                    <span>自动优化弧线</span>
+                </label>
+                <button class="view-reset-btn" onclick="resetView()" title="重置视图（还原平移与缩放）">⤢ 复位视图</button>
+            </div>
         </div>
         <div class="toolbar">
             <button class="tool-btn active" data-tool="select" onclick="switchTool('select')">

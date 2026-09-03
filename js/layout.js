@@ -8,10 +8,15 @@
         const n = nodes.length;
         if (n < 2) return;
 
-        const rect = svg.getBoundingClientRect();
-        const w = Math.max(320, rect.width || 800);
-        const h = Math.max(240, rect.height || 600);
-        const margin = 80;
+        // 布局约束在当前可视世界区域内，任何平移/缩放状态下都铺满眼前视野
+        const vr = getViewWorldRect();
+        const margin = 80 / viewScale;
+        const w = Math.max(vr.w, 320 / viewScale);
+        const h = Math.max(vr.h, 240 / viewScale);
+        const minX = vr.x + margin;
+        const minY = vr.y + margin;
+        const maxX = vr.x + w - margin;
+        const maxY = vr.y + h - margin;
 
         // 保存弧线控制点相对两端节点的几何参数（沿边比例 + 法向高度），布局后按新位置还原
         const arcSnap = [];
@@ -32,8 +37,7 @@
 
         // 理想边长与初始温度（Fruchterman-Reingold）
         const k = Math.sqrt((w - 2 * margin) * (h - 2 * margin) / Math.max(n, 1)) * 0.85;
-        let temp = Math.min(w, h) / 5;
-        const cooling = Math.pow(0.08 / Math.max(temp, 0.01), 1 / iterations);
+        let temp = Math.min(w, h) / 5;        const cooling = Math.pow(0.08 / Math.max(temp, 0.01), 1 / iterations);
 
         // 无向去重边表（平行边只计算一次引力）
         const seen = new Set();
@@ -80,14 +84,14 @@
                 disp[link[1]].x -= fx; disp[link[1]].y -= fy;
             });
 
-            // 限制最大位移并约束在画布内
+            // 限制最大位移并约束在可视区域边缘内
             for (let i = 0; i < n; i++) {
                 let dx = disp[i].x;
                 let dy = disp[i].y;
                 const dl = Math.sqrt(dx * dx + dy * dy);
                 if (dl > temp) { dx = dx / dl * temp; dy = dy / dl * temp; }
-                nodes[i].x = Math.max(margin, Math.min(w - margin, nodes[i].x + dx));
-                nodes[i].y = Math.max(margin, Math.min(h - margin, nodes[i].y + dy));
+                nodes[i].x = Math.max(minX, Math.min(maxX, nodes[i].x + dx));
+                nodes[i].y = Math.max(minY, Math.min(maxY, nodes[i].y + dy));
             }
             temp *= cooling;
         }
@@ -216,11 +220,11 @@
         });
     }
 
-    // 将节点散布在画布网格中并加入随机抖动，避免大量重叠
-    function computeGridPositions(count, rect) {
-        const margin = 70;
-        const w = Math.max(200, rect.width - margin * 2);
-        const h = Math.max(150, rect.height - margin * 2);
+    // 将节点散布在可视区域网格中并加入随机抖动，避免大量重叠
+    function computeGridPositions(count, vr) {
+        const margin = 70 / viewScale;
+        const w = Math.max(200 / viewScale, vr.w - margin * 2);
+        const h = Math.max(150 / viewScale, vr.h - margin * 2);
         const cols = Math.ceil(Math.sqrt(count * w / h));
         const rows = Math.ceil(count / cols);
         const cellW = w / cols;
@@ -230,8 +234,8 @@
             const c = i % cols;
             const r = Math.floor(i / cols);
             positions.push({
-                x: margin + (c + 0.5) * cellW + (Math.random() - 0.5) * cellW * 0.6,
-                y: margin + (r + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.6
+                x: vr.x + margin + (c + 0.5) * cellW + (Math.random() - 0.5) * cellW * 0.6,
+                y: vr.y + margin + (r + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.6
             });
         }
         return shuffleArray(positions);
@@ -278,12 +282,12 @@
         return arr;
     }
 
-    function gridPositions(rows, cols, rect) {
-        const pad = 70;
-        const w = Math.max(160, rect.width - pad * 2);
-        const h = Math.max(160, rect.height - pad * 2);
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
+    function gridPositions(rows, cols, vr) {
+        const pad = 70 / viewScale;
+        const w = Math.max(160 / viewScale, vr.w - pad * 2);
+        const h = Math.max(160 / viewScale, vr.h - pad * 2);
+        const cx = vr.x + vr.w / 2;
+        const cy = vr.y + vr.h / 2;
         const stepX = cols > 1 ? w / (cols - 1) : 0;
         const stepY = rows > 1 ? h / (rows - 1) : 0;
         const arr = [];
@@ -306,11 +310,12 @@
     }
 
     // 规划一份“预设图”：返回 { n, m, positions, pairs }
-    function buildPresetPlan(rect) {
+    function buildPresetPlan() {
+        const vr = getViewWorldRect();
         const preset = document.getElementById('randPreset').value;
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
-        const radius = Math.max(90, Math.min(rect.width, rect.height) / 2 - 90);
+        const cx = vr.x + vr.w / 2;
+        const cy = vr.y + vr.h / 2;
+        const radius = Math.max(40 / viewScale, Math.min(vr.w, vr.h) / 2 - 90 / viewScale);
 
         if (preset === 'random') {
             const mode = document.querySelector('input[name="randMode"]:checked').value;
@@ -333,7 +338,7 @@
             return {
                 label: '随机图',
                 n, m,
-                positions: computeGridPositions(n, rect),
+                positions: computeGridPositions(n, vr),
                 pairs: buildRandomEdges(n, m)
             };
         }
@@ -353,7 +358,7 @@
             return {
                 label: '网格图',
                 n, m: pairs.length,
-                positions: gridPositions(rows, cols, rect),
+                positions: gridPositions(rows, cols, vr),
                 pairs
             };
         }
@@ -405,8 +410,7 @@
 
     function generateRandomTopology() {
         refreshPresetTip();
-        const rect = svg.getBoundingClientRect();
-        const plan = buildPresetPlan(rect);
+        const plan = buildPresetPlan();
         if (!plan) return;
 
         const msg = `将清空当前画布，生成${plan.label}：${plan.n} 个节点、${plan.m} 条连线。\n是否继续？`;

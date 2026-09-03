@@ -2,6 +2,7 @@
 // 依赖：无（最先加载）。供 analysis.js / layout.js 调用。
 
     const svg = document.getElementById('graphSvg');
+    const viewportGroup = document.getElementById('viewportGroup');
     const edgesGroup = document.getElementById('edgesGroup');
     const nodesGroup = document.getElementById('nodesGroup');
     const controlPointsGroup = document.getElementById('controlPointsGroup');
@@ -18,6 +19,11 @@
     let dragging = null;
     let drawingTemp = null;
     let newNodeCallback = null;
+
+    // 画布视图：世界坐标 = (屏幕坐标 - 位移) / 缩放
+    let viewTx = 0;
+    let viewTy = 0;
+    let viewScale = 1;
 
     let cycles = [];
     let paths = [];
@@ -91,6 +97,52 @@
         };
     }
 
+    // ===== 画布视图（平移 / 缩放）=====
+    function applyViewTransform() {
+        viewportGroup.setAttribute('transform',
+            `translate(${viewTx}, ${viewTy}) scale(${viewScale})`);
+    }
+
+    function resetView() {
+        viewTx = 0;
+        viewTy = 0;
+        viewScale = 1;
+        applyViewTransform();
+    }
+
+    // 当前可视区域对应的世界坐标矩形（供生成/布局内容时适配任意视图）
+    function getViewWorldRect() {
+        const r = svg.getBoundingClientRect();
+        return {
+            x: -viewTx / viewScale,
+            y: -viewTy / viewScale,
+            w: r.width / viewScale,
+            h: r.height / viewScale
+        };
+    }
+
+    // 以屏幕坐标 (sx, sy) 为中心缩放，保持该点下的内容不动
+    function zoomViewAt(sx, sy, factor) {
+        const MIN_SCALE = 0.15;
+        const MAX_SCALE = 8;
+        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, viewScale * factor));
+        const f = next / viewScale;
+        if (f === 1) return;
+        viewScale = next;
+        viewTx = sx - (sx - viewTx) * f;
+        viewTy = sy - (sy - viewTy) * f;
+        applyViewTransform();
+    }
+
+    function onSvgWheel(e) {
+        e.preventDefault();
+        const rect = svg.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        const factor = Math.exp(-e.deltaY * 0.0015);
+        zoomViewAt(sx, sy, factor);
+    }
+
     function init() {
         addNode(200, 150);
         addNode(400, 150);
@@ -124,9 +176,10 @@
 
     function addNode(x, y, color = '#409eff', shape = 'circle', size = 18) {
         if (x === undefined) {
-            const rect = svg.getBoundingClientRect();
-            x = rect.width / 2 + (Math.random() - 0.5) * 100;
-            y = rect.height / 2 + (Math.random() - 0.5) * 100;
+            // 默认放在当前可视区域中心附近
+            const vr = getViewWorldRect();
+            x = vr.x + vr.w / 2 + (Math.random() - 0.5) * (100 / viewScale);
+            y = vr.y + vr.h / 2 + (Math.random() - 0.5) * (100 / viewScale);
         }
         const node = { id: nextNodeId++, x, y, color, shape, size };
         nodes.push(node);
@@ -599,6 +652,7 @@
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
         svg.addEventListener('contextmenu', onContextMenu);
+        svg.addEventListener('wheel', onSvgWheel, { passive: false });
 
         document.addEventListener('mousedown', (e) => {
             if (!e.target.closest('.context-menu') && 
@@ -611,7 +665,13 @@
 
     function getSvgPoint(e) {
         const rect = svg.getBoundingClientRect();
-        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        // 屏幕坐标 → 世界坐标（考虑平移与缩放）
+        return {
+            x: (sx - viewTx) / viewScale,
+            y: (sy - viewTy) / viewScale
+        };
     }
 
     function getNodeAtPoint(x, y) {
@@ -681,12 +741,29 @@
         if (currentTool === 'select') {
             clearHighlight();
         }
+
+        // 空白区域：左键按下开始拖动画布
+        dragging = {
+            type: 'pan',
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            startTx: viewTx,
+            startTy: viewTy
+        };
+        svg.classList.add('panning');
     }
 
     function onMouseMove(e) {
         const point = getSvgPoint(e);
 
         if (dragging) {
+            if (dragging.type === 'pan') {
+                viewTx = dragging.startTx + (e.clientX - dragging.startClientX);
+                viewTy = dragging.startTy + (e.clientY - dragging.startClientY);
+                applyViewTransform();
+                return;
+            }
+
             if (dragging.type === 'node') {
                 dragging.target.x = point.x - dragging.offsetX;
                 dragging.target.y = point.y - dragging.offsetY;
@@ -717,6 +794,11 @@
         if (dragging) {
             const wasDragging = dragging;
             dragging = null;
+
+            if (wasDragging.type === 'pan') {
+                svg.classList.remove('panning');
+                return;
+            }
 
             if (wasDragging.type === 'control' && wasDragging.target) {
                 // 用户手动拖过该弧线控制点 → 之后不再被自动优化覆盖
@@ -879,9 +961,10 @@
         });
 
         const nodeArr = Array.from(nodeSet).sort((a,b) => a-b);
-        const rect = svg.getBoundingClientRect();
-        const cx = rect.width / 2, cy = rect.height / 2;
-        const radius = Math.min(cx, cy) * 0.7;
+        // 布局在当前可视区域中心，适配已缩放/平移的视图
+        const vr = getViewWorldRect();
+        const cx = vr.x + vr.w / 2, cy = vr.y + vr.h / 2;
+        const radius = Math.max(0, Math.min(vr.w, vr.h) * 0.35);
 
         nodeArr.forEach((id, i) => {
             const angle = -Math.PI/2 + i * 2 * Math.PI / nodeArr.length;

@@ -33,8 +33,10 @@
         #graphSvg {
             width: 100%;
             height: 100%;
-            cursor: default;
+            cursor: grab;
+            touch-action: none;
         }
+        #graphSvg.panning { cursor: grabbing; }
 
         .toolbar {
             height: 56px;
@@ -335,12 +337,17 @@
             fill: #e74c3c !important;
         }
 
-        /* 画布右上角：弧线自动优化开关 */
-        .arc-opt-bar {
+        /* 画布右上角：视图工具（自动优化弧线开关 + 复位视图） */
+        .canvas-corner-controls {
             position: absolute;
             top: 10px;
             right: 12px;
             z-index: 50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .arc-opt-bar {
             background: rgba(255,255,255,0.92);
             border: 1px solid #e4e7ed;
             border-radius: 16px;
@@ -379,6 +386,19 @@
         .arc-opt-bar input:checked + .arc-opt-track { background: #409eff; }
         .arc-opt-bar input:checked + .arc-opt-track::after { left: 16px; }
         .arc-opt-bar:hover { border-color: #409eff; }
+        .view-reset-btn {
+            height: 26px;
+            padding: 0 10px;
+            border: 1px solid #e4e7ed;
+            border-radius: 13px;
+            background: rgba(255,255,255,0.92);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            font-size: 12px;
+            color: #606266;
+            cursor: pointer;
+            user-select: none;
+        }
+        .view-reset-btn:hover { border-color: #409eff; color: #409eff; }
     </style>
 </head>
 <body>
@@ -400,16 +420,21 @@
                         <polygon points="10 0, 0 5, 10 10" fill="#e74c3c"/>
                     </marker>
                 </defs>
-                <g id="edgesGroup"></g>
-                <g id="nodesGroup"></g>
-                <g id="controlPointsGroup"></g>
-                <g id="tempDrawGroup"></g>
+                <g id="viewportGroup">
+                    <g id="edgesGroup"></g>
+                    <g id="nodesGroup"></g>
+                    <g id="controlPointsGroup"></g>
+                    <g id="tempDrawGroup"></g>
+                </g>
             </svg>
-            <label class="arc-opt-bar" title="开启后：随机生成、拖拽节点、自动布局、新增弧线时自动优化弧线弯曲（手动拖过控制点的弧线除外）">
-                <input type="checkbox" id="arcAutoCb" onchange="onArcAutoChange()">
-                <span class="arc-opt-track"></span>
-                <span>自动优化弧线</span>
-            </label>
+            <div class="canvas-corner-controls">
+                <label class="arc-opt-bar" title="开启后：随机生成、拖拽节点、自动布局、新增弧线时自动优化弧线弯曲（手动拖过控制点的弧线除外）">
+                    <input type="checkbox" id="arcAutoCb" onchange="onArcAutoChange()">
+                    <span class="arc-opt-track"></span>
+                    <span>自动优化弧线</span>
+                </label>
+                <button class="view-reset-btn" onclick="resetView()" title="重置视图（还原平移与缩放）">⤢ 复位视图</button>
+            </div>
         </div>
         <div class="toolbar">
             <button class="tool-btn active" data-tool="select" onclick="switchTool('select')">
@@ -618,6 +643,7 @@
 // 依赖：无（最先加载）。供 analysis.js / layout.js 调用。
 
     const svg = document.getElementById('graphSvg');
+    const viewportGroup = document.getElementById('viewportGroup');
     const edgesGroup = document.getElementById('edgesGroup');
     const nodesGroup = document.getElementById('nodesGroup');
     const controlPointsGroup = document.getElementById('controlPointsGroup');
@@ -634,6 +660,11 @@
     let dragging = null;
     let drawingTemp = null;
     let newNodeCallback = null;
+
+    // 画布视图：世界坐标 = (屏幕坐标 - 位移) / 缩放
+    let viewTx = 0;
+    let viewTy = 0;
+    let viewScale = 1;
 
     let cycles = [];
     let paths = [];
@@ -707,6 +738,52 @@
         };
     }
 
+    // ===== 画布视图（平移 / 缩放）=====
+    function applyViewTransform() {
+        viewportGroup.setAttribute('transform',
+            `translate(${viewTx}, ${viewTy}) scale(${viewScale})`);
+    }
+
+    function resetView() {
+        viewTx = 0;
+        viewTy = 0;
+        viewScale = 1;
+        applyViewTransform();
+    }
+
+    // 当前可视区域对应的世界坐标矩形（供生成/布局内容时适配任意视图）
+    function getViewWorldRect() {
+        const r = svg.getBoundingClientRect();
+        return {
+            x: -viewTx / viewScale,
+            y: -viewTy / viewScale,
+            w: r.width / viewScale,
+            h: r.height / viewScale
+        };
+    }
+
+    // 以屏幕坐标 (sx, sy) 为中心缩放，保持该点下的内容不动
+    function zoomViewAt(sx, sy, factor) {
+        const MIN_SCALE = 0.15;
+        const MAX_SCALE = 8;
+        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, viewScale * factor));
+        const f = next / viewScale;
+        if (f === 1) return;
+        viewScale = next;
+        viewTx = sx - (sx - viewTx) * f;
+        viewTy = sy - (sy - viewTy) * f;
+        applyViewTransform();
+    }
+
+    function onSvgWheel(e) {
+        e.preventDefault();
+        const rect = svg.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        const factor = Math.exp(-e.deltaY * 0.0015);
+        zoomViewAt(sx, sy, factor);
+    }
+
     function init() {
         addNode(200, 150);
         addNode(400, 150);
@@ -740,9 +817,10 @@
 
     function addNode(x, y, color = '#409eff', shape = 'circle', size = 18) {
         if (x === undefined) {
-            const rect = svg.getBoundingClientRect();
-            x = rect.width / 2 + (Math.random() - 0.5) * 100;
-            y = rect.height / 2 + (Math.random() - 0.5) * 100;
+            // 默认放在当前可视区域中心附近
+            const vr = getViewWorldRect();
+            x = vr.x + vr.w / 2 + (Math.random() - 0.5) * (100 / viewScale);
+            y = vr.y + vr.h / 2 + (Math.random() - 0.5) * (100 / viewScale);
         }
         const node = { id: nextNodeId++, x, y, color, shape, size };
         nodes.push(node);
@@ -1215,6 +1293,7 @@
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
         svg.addEventListener('contextmenu', onContextMenu);
+        svg.addEventListener('wheel', onSvgWheel, { passive: false });
 
         document.addEventListener('mousedown', (e) => {
             if (!e.target.closest('.context-menu') && 
@@ -1227,7 +1306,13 @@
 
     function getSvgPoint(e) {
         const rect = svg.getBoundingClientRect();
-        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        // 屏幕坐标 → 世界坐标（考虑平移与缩放）
+        return {
+            x: (sx - viewTx) / viewScale,
+            y: (sy - viewTy) / viewScale
+        };
     }
 
     function getNodeAtPoint(x, y) {
@@ -1297,12 +1382,29 @@
         if (currentTool === 'select') {
             clearHighlight();
         }
+
+        // 空白区域：左键按下开始拖动画布
+        dragging = {
+            type: 'pan',
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            startTx: viewTx,
+            startTy: viewTy
+        };
+        svg.classList.add('panning');
     }
 
     function onMouseMove(e) {
         const point = getSvgPoint(e);
 
         if (dragging) {
+            if (dragging.type === 'pan') {
+                viewTx = dragging.startTx + (e.clientX - dragging.startClientX);
+                viewTy = dragging.startTy + (e.clientY - dragging.startClientY);
+                applyViewTransform();
+                return;
+            }
+
             if (dragging.type === 'node') {
                 dragging.target.x = point.x - dragging.offsetX;
                 dragging.target.y = point.y - dragging.offsetY;
@@ -1333,6 +1435,11 @@
         if (dragging) {
             const wasDragging = dragging;
             dragging = null;
+
+            if (wasDragging.type === 'pan') {
+                svg.classList.remove('panning');
+                return;
+            }
 
             if (wasDragging.type === 'control' && wasDragging.target) {
                 // 用户手动拖过该弧线控制点 → 之后不再被自动优化覆盖
@@ -1495,9 +1602,10 @@
         });
 
         const nodeArr = Array.from(nodeSet).sort((a,b) => a-b);
-        const rect = svg.getBoundingClientRect();
-        const cx = rect.width / 2, cy = rect.height / 2;
-        const radius = Math.min(cx, cy) * 0.7;
+        // 布局在当前可视区域中心，适配已缩放/平移的视图
+        const vr = getViewWorldRect();
+        const cx = vr.x + vr.w / 2, cy = vr.y + vr.h / 2;
+        const radius = Math.max(0, Math.min(vr.w, vr.h) * 0.35);
 
         nodeArr.forEach((id, i) => {
             const angle = -Math.PI/2 + i * 2 * Math.PI / nodeArr.length;
@@ -1939,10 +2047,15 @@
         const n = nodes.length;
         if (n < 2) return;
 
-        const rect = svg.getBoundingClientRect();
-        const w = Math.max(320, rect.width || 800);
-        const h = Math.max(240, rect.height || 600);
-        const margin = 80;
+        // 布局约束在当前可视世界区域内，任何平移/缩放状态下都铺满眼前视野
+        const vr = getViewWorldRect();
+        const margin = 80 / viewScale;
+        const w = Math.max(vr.w, 320 / viewScale);
+        const h = Math.max(vr.h, 240 / viewScale);
+        const minX = vr.x + margin;
+        const minY = vr.y + margin;
+        const maxX = vr.x + w - margin;
+        const maxY = vr.y + h - margin;
 
         // 保存弧线控制点相对两端节点的几何参数（沿边比例 + 法向高度），布局后按新位置还原
         const arcSnap = [];
@@ -1963,8 +2076,7 @@
 
         // 理想边长与初始温度（Fruchterman-Reingold）
         const k = Math.sqrt((w - 2 * margin) * (h - 2 * margin) / Math.max(n, 1)) * 0.85;
-        let temp = Math.min(w, h) / 5;
-        const cooling = Math.pow(0.08 / Math.max(temp, 0.01), 1 / iterations);
+        let temp = Math.min(w, h) / 5;        const cooling = Math.pow(0.08 / Math.max(temp, 0.01), 1 / iterations);
 
         // 无向去重边表（平行边只计算一次引力）
         const seen = new Set();
@@ -2011,14 +2123,14 @@
                 disp[link[1]].x -= fx; disp[link[1]].y -= fy;
             });
 
-            // 限制最大位移并约束在画布内
+            // 限制最大位移并约束在可视区域边缘内
             for (let i = 0; i < n; i++) {
                 let dx = disp[i].x;
                 let dy = disp[i].y;
                 const dl = Math.sqrt(dx * dx + dy * dy);
                 if (dl > temp) { dx = dx / dl * temp; dy = dy / dl * temp; }
-                nodes[i].x = Math.max(margin, Math.min(w - margin, nodes[i].x + dx));
-                nodes[i].y = Math.max(margin, Math.min(h - margin, nodes[i].y + dy));
+                nodes[i].x = Math.max(minX, Math.min(maxX, nodes[i].x + dx));
+                nodes[i].y = Math.max(minY, Math.min(maxY, nodes[i].y + dy));
             }
             temp *= cooling;
         }
@@ -2147,11 +2259,11 @@
         });
     }
 
-    // 将节点散布在画布网格中并加入随机抖动，避免大量重叠
-    function computeGridPositions(count, rect) {
-        const margin = 70;
-        const w = Math.max(200, rect.width - margin * 2);
-        const h = Math.max(150, rect.height - margin * 2);
+    // 将节点散布在可视区域网格中并加入随机抖动，避免大量重叠
+    function computeGridPositions(count, vr) {
+        const margin = 70 / viewScale;
+        const w = Math.max(200 / viewScale, vr.w - margin * 2);
+        const h = Math.max(150 / viewScale, vr.h - margin * 2);
         const cols = Math.ceil(Math.sqrt(count * w / h));
         const rows = Math.ceil(count / cols);
         const cellW = w / cols;
@@ -2161,8 +2273,8 @@
             const c = i % cols;
             const r = Math.floor(i / cols);
             positions.push({
-                x: margin + (c + 0.5) * cellW + (Math.random() - 0.5) * cellW * 0.6,
-                y: margin + (r + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.6
+                x: vr.x + margin + (c + 0.5) * cellW + (Math.random() - 0.5) * cellW * 0.6,
+                y: vr.y + margin + (r + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.6
             });
         }
         return shuffleArray(positions);
@@ -2209,12 +2321,12 @@
         return arr;
     }
 
-    function gridPositions(rows, cols, rect) {
-        const pad = 70;
-        const w = Math.max(160, rect.width - pad * 2);
-        const h = Math.max(160, rect.height - pad * 2);
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
+    function gridPositions(rows, cols, vr) {
+        const pad = 70 / viewScale;
+        const w = Math.max(160 / viewScale, vr.w - pad * 2);
+        const h = Math.max(160 / viewScale, vr.h - pad * 2);
+        const cx = vr.x + vr.w / 2;
+        const cy = vr.y + vr.h / 2;
         const stepX = cols > 1 ? w / (cols - 1) : 0;
         const stepY = rows > 1 ? h / (rows - 1) : 0;
         const arr = [];
@@ -2237,11 +2349,12 @@
     }
 
     // 规划一份“预设图”：返回 { n, m, positions, pairs }
-    function buildPresetPlan(rect) {
+    function buildPresetPlan() {
+        const vr = getViewWorldRect();
         const preset = document.getElementById('randPreset').value;
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
-        const radius = Math.max(90, Math.min(rect.width, rect.height) / 2 - 90);
+        const cx = vr.x + vr.w / 2;
+        const cy = vr.y + vr.h / 2;
+        const radius = Math.max(40 / viewScale, Math.min(vr.w, vr.h) / 2 - 90 / viewScale);
 
         if (preset === 'random') {
             const mode = document.querySelector('input[name="randMode"]:checked').value;
@@ -2264,7 +2377,7 @@
             return {
                 label: '随机图',
                 n, m,
-                positions: computeGridPositions(n, rect),
+                positions: computeGridPositions(n, vr),
                 pairs: buildRandomEdges(n, m)
             };
         }
@@ -2284,7 +2397,7 @@
             return {
                 label: '网格图',
                 n, m: pairs.length,
-                positions: gridPositions(rows, cols, rect),
+                positions: gridPositions(rows, cols, vr),
                 pairs
             };
         }
@@ -2336,8 +2449,7 @@
 
     function generateRandomTopology() {
         refreshPresetTip();
-        const rect = svg.getBoundingClientRect();
-        const plan = buildPresetPlan(rect);
+        const plan = buildPresetPlan();
         if (!plan) return;
 
         const msg = `将清空当前画布，生成${plan.label}：${plan.n} 个节点、${plan.m} 条连线。\n是否继续？`;
