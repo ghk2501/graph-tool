@@ -10,7 +10,20 @@
 https://ghk2501.github.io/graph-tool/
 ```
 
-也可以下载 `index.html` 双击本地打开，功能完全一致。
+也可以下载整个仓库后双击 `index.html` 本地打开（需与 `js/` 目录保持相对位置），功能完全一致。
+
+## 📁 项目结构
+
+```
+├── index.html          # 页面骨架 + 内联样式（UI 结构）
+└── js/
+    ├── core.js         # 核心状态、节点/连线编辑、SVG 渲染、右键菜单、导入导出、重置
+    ├── analysis.js     # 拓扑分析：环路、两点路径、几何交点统计
+    └── layout.js       # 力导向自动布局、随机生成（含结构预设），最后加载并启动
+```
+
+> 三个 JS 通过普通 `<script>` 按 `core → analysis → layout` 顺序加载，
+> 保持零构建、零依赖，`file://` 直接双击即可运行，同样支持 GitHub Pages 部署。
 
 ## ✨ 功能特性
 
@@ -55,7 +68,7 @@ npx serve .
 
 ## 🛠️ 技术栈
 
-- 原生 HTML + CSS + JavaScript（ES6），单文件、零依赖
+- 原生 HTML + CSS + JavaScript（ES6），零依赖、零构建，按模块拆分便于维护
 - SVG 矢量渲染，二次贝塞尔曲线
 - 算法：DFS（环路/路径搜索）、旋转归一化去重、叉积几何求交、Fruchterman-Reingold 力导向布局、多边形边界解析求交
 
