@@ -114,6 +114,7 @@
         if (nodes.length === 0) return;
         hideAllMenus();
         applyForceLayout(320);
+        optimizeArcs();   // 开启“自动优化弧线”时在布局后重排弧线，否则为无操作
         render();
     }
 
@@ -437,6 +438,7 @@
         // 随机图与树形图用力导向收敛，使布局更均匀；规则图（环/星/轮辐/网格）保留几何结构
         if (preset === 'random' || preset === 'tree') applyForceLayout(320);
         updatePathSelects();
+        optimizeArcs();   // 开启“自动优化弧线”时在此优化，否则为无操作
         render();
     }
 

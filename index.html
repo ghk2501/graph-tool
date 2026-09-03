@@ -334,6 +334,51 @@
         .highlight-node {
             fill: #e74c3c !important;
         }
+
+        /* 画布右上角：弧线自动优化开关 */
+        .arc-opt-bar {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            z-index: 50;
+            background: rgba(255,255,255,0.92);
+            border: 1px solid #e4e7ed;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 4px 10px 4px 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #606266;
+            cursor: pointer;
+            user-select: none;
+        }
+        .arc-opt-bar input { display: none; }
+        .arc-opt-track {
+            width: 30px;
+            height: 16px;
+            border-radius: 8px;
+            background: #dcdfe6;
+            position: relative;
+            transition: background 0.2s;
+            flex: none;
+        }
+        .arc-opt-track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            transition: left 0.2s;
+        }
+        .arc-opt-bar input:checked + .arc-opt-track { background: #409eff; }
+        .arc-opt-bar input:checked + .arc-opt-track::after { left: 16px; }
+        .arc-opt-bar:hover { border-color: #409eff; }
     </style>
 </head>
 <body>
@@ -360,6 +405,11 @@
                 <g id="controlPointsGroup"></g>
                 <g id="tempDrawGroup"></g>
             </svg>
+            <label class="arc-opt-bar" title="开启后：随机生成、拖拽节点、自动布局、新增弧线时自动优化弧线弯曲（手动拖过控制点的弧线除外）">
+                <input type="checkbox" id="arcAutoCb" onchange="onArcAutoChange()">
+                <span class="arc-opt-track"></span>
+                <span>自动优化弧线</span>
+            </label>
         </div>
         <div class="toolbar">
             <button class="tool-btn active" data-tool="select" onclick="switchTool('select')">

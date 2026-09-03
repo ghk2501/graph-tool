@@ -24,6 +24,7 @@
     let activeHighlightType = null;
     let activeHighlightIndex = -1;
     let highlightTimer = null;
+    let autoOptimizeArcs = false;   // 画布开关：开启后自动优化弧线形状
 
     const ARROW_OFFSET = 4;
     const ARC_SAMPLE_STEPS = 24;
@@ -234,6 +235,7 @@
         };
         if (type === '~') {
             edge.controlPoint = computeDefaultControlPoint(u, v);
+            edge.manualCp = false;  // 该弧线控制点尚未被手动拖拽过
         }
         edges.push(edge);
         return edge;
@@ -251,6 +253,118 @@
         return { x: (u.x + v.x) / 2 + nx, y: (u.y + v.y) / 2 + ny };
     }
 
+    // ===== 弧线自动优化 =====
+    // 在“自动优化弧线”开启时调用：让每条未经手动调整的弧线自动选择更合适的
+    // 弯曲方向与幅度——避开途经的节点、平行弧线交错分布在两侧，观感更整齐。
+    function sampleBezierXY(x1, y1, cx, cy, x2, y2, steps) {
+        const pts = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const mt = 1 - t;
+            pts.push({
+                x: mt * mt * x1 + 2 * mt * t * cx + t * t * x2,
+                y: mt * mt * y1 + 2 * mt * t * cy + t * t * y2
+            });
+        }
+        return pts;
+    }
+
+    // 返回弧线穿过其它节点的“穿透程度”，0 表示完全避让干净
+    function arcCollisionScore(u, v, cp) {
+        const pts = sampleBezierXY(u.x, u.y, cp.x, cp.y, v.x, v.y, 16);
+        let worst = 0;
+        for (const n of nodes) {
+            if (n.id === u.id || n.id === v.id) continue;
+            const need = n.size + 8;
+            for (const p of pts) {
+                const d = Math.hypot(p.x - n.x, p.y - n.y);
+                if (d < need) {
+                    const pen = need - d;
+                    if (pen > worst) worst = pen;
+                }
+            }
+        }
+        return worst;
+    }
+
+    // 为单条弧线挑选一个较好的控制点（返回 { cp, score, h }）
+    function pickArcControl(u, v, forcedSide) {
+        const dx = v.x - u.x;
+        const dy = v.y - u.y;
+        const len = Math.hypot(dx, dy) || 1;
+        // 左法线（与 computeDefaultControlPoint 一致：默认弧线向左侧弯曲）
+        const nx = -dy / len;
+        const ny = dx / len;
+        const mx = (u.x + v.x) / 2;
+        const my = (u.y + v.y) / 2;
+        const minR = Math.max(u.size, v.size);
+        // 基准弯曲高度：过短/节点过大时保证仍有可见弯曲，同时避免过度外甩
+        const hBase = Math.min(Math.max(len * 0.28, minR + 12), len * 0.8);
+        const sides = forcedSide ? [forcedSide] : [1, -1];
+        const mults = [1, 1.9, 3.2];
+        let best = null;
+        for (const side of sides) {
+            for (const mult of mults) {
+                const h = hBase * mult;
+                const cp = { x: mx + nx * h * side, y: my + ny * h * side };
+                const score = arcCollisionScore(u, v, cp);
+                if (!best || score < best.score || (score === best.score && h < best.h)) {
+                    best = { cp, score, h };
+                }
+            }
+        }
+        return best;
+    }
+
+    function optimizeArcs() {
+        if (!autoOptimizeArcs) return;
+        if (nodes.length < 2) return;
+
+        // 统计同一“有向节点对”上的平行弧线，避免同向多条弧线完全重叠
+        const dirCount = {};
+        edges.forEach(e => {
+            if (e.type === '~' && e.controlPoint) {
+                const k = e.u + '>' + e.v;
+                dirCount[k] = (dirCount[k] || 0) + 1;
+            }
+        });
+        const laneUsed = {};
+
+        edges.forEach(edge => {
+            if (edge.type !== '~' || !edge.controlPoint || edge.manualCp) return;
+            const u = getNodeById(edge.u);
+            const v = getNodeById(edge.v);
+            if (!u || !v) return;
+
+            const k = edge.u + '>' + edge.v;
+            const lane = laneUsed[k] || 0;
+            laneUsed[k] = lane + 1;
+
+            // 若同向存在多条平行弧线，按次序左右交错，防止彼此重叠
+            const forcedSide = dirCount[k] > 1 ? (lane % 2 === 0 ? 1 : -1) : null;
+            const res = pickArcControl(u, v, forcedSide);
+            if (res) {
+                edge.controlPoint = res.cp;
+            }
+        });
+    }
+
+    // 仅在开关开启时触发一次“优化 + 重绘”
+    function maybeOptimizeArcs() {
+        if (!autoOptimizeArcs) return;
+        optimizeArcs();
+        render();
+    }
+
+    // 画布角落开关
+    function onArcAutoChange() {
+        const cb = document.getElementById('arcAutoCb');
+        autoOptimizeArcs = !!cb.checked;
+        if (autoOptimizeArcs) {
+            maybeOptimizeArcs();
+        }
+    }
+
     function deleteEdge(id) {
         edges = edges.filter(e => e.id !== id);
         render();
@@ -262,13 +376,16 @@
         if (edge.type === '-') {
             edge.type = '~';
             edge.controlPoint = computeDefaultControlPoint(edge.u, edge.v);
+            edge.manualCp = false;
             edge.color = '#409eff';
         } else {
             edge.type = '-';
             delete edge.controlPoint;
+            delete edge.manualCp;
             edge.color = '#606266';
         }
         render();
+        if (edge.type === '~') maybeOptimizeArcs();
         hideAllMenus();
     }
 
@@ -598,7 +715,18 @@
         const point = getSvgPoint(e);
 
         if (dragging) {
+            const wasDragging = dragging;
             dragging = null;
+
+            if (wasDragging.type === 'control' && wasDragging.target) {
+                // 用户手动拖过该弧线控制点 → 之后不再被自动优化覆盖
+                wasDragging.target.manualCp = true;
+            } else if (wasDragging.type === 'node' && autoOptimizeArcs) {
+                // 开启自动优化时，节点移动结束后重排其关联的弧线形状
+                optimizeArcs();
+                render();
+            }
+
             if (activeHighlightIndex >= 0) {
                 if (activeHighlightType === 'cycle') highlightCycle(activeHighlightIndex);
                 else if (activeHighlightType === 'path') highlightPath(activeHighlightIndex);
@@ -629,6 +757,7 @@
                         else { type = '~'; bidir = true; }
                         addEdgeById(startId, newNode.id, type, bidir);
                         render();
+                        maybeOptimizeArcs();
                     });
                 }, 10);
             }
@@ -641,10 +770,10 @@
     function showEdgeTypeMenu(x, y, startId, endId) {
         const items = [
             { subtitle: '选择连线类型' },
-            { label: '单向直线', action: () => { addEdgeById(startId, endId, '-', false); render(); hideAllMenus(); } },
-            { label: '单向弧线', action: () => { addEdgeById(startId, endId, '~', false); render(); hideAllMenus(); } },
-            { label: '双向直线', action: () => { addEdgeById(startId, endId, '-', true); render(); hideAllMenus(); } },
-            { label: '双向弧线', action: () => { addEdgeById(startId, endId, '~', true); render(); hideAllMenus(); } }
+            { label: '单向直线', action: () => { addEdgeById(startId, endId, '-', false); render(); maybeOptimizeArcs(); hideAllMenus(); } },
+            { label: '单向弧线', action: () => { addEdgeById(startId, endId, '~', false); render(); maybeOptimizeArcs(); hideAllMenus(); } },
+            { label: '双向直线', action: () => { addEdgeById(startId, endId, '-', true); render(); maybeOptimizeArcs(); hideAllMenus(); } },
+            { label: '双向弧线', action: () => { addEdgeById(startId, endId, '~', true); render(); maybeOptimizeArcs(); hideAllMenus(); } }
         ];
         showContextMenu(x, y, items);
     }
@@ -778,6 +907,7 @@
 
         updatePathSelects();
         render();
+        maybeOptimizeArcs();
     }
 
 
