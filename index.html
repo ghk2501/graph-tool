@@ -399,6 +399,151 @@
             user-select: none;
         }
         .view-reset-btn:hover { border-color: #409eff; color: #409eff; }
+
+        /* ===== 导出对话框 ===== */
+        .modal-mask {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(0,0,0,0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .export-box {
+            width: 660px;
+            max-width: 94vw;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+            display: flex;
+            flex-direction: column;
+            max-height: 88vh;
+            font-size: 13px;
+            color: #303133;
+        }
+        .export-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid #e4e7ed;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .export-close {
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 16px;
+            color: #909399;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .export-close:hover { background: #f0f2f5; color: #606266; }
+        .export-body {
+            padding: 12px 18px 14px;
+            overflow-y: auto;
+        }
+        .export-sec-title {
+            font-weight: 600;
+            font-size: 13px;
+            color: #34495e;
+            border-left: 3px solid #409eff;
+            padding-left: 8px;
+            margin: 8px 0;
+        }
+        .export-sec-title:first-child { margin-top: 0; }
+        .export-checks {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 18px;
+            margin-bottom: 6px;
+        }
+        .export-checks .radio-label { font-size: 13px; }
+        .exp-all-btns {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .exp-all-btn {
+            border: none;
+            background: transparent;
+            color: #409eff;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 4px;
+        }
+        .exp-all-btn:hover { text-decoration: underline; }
+        .exp-path-section {
+            background: #fafbfc;
+            border: 1px solid #ebeef5;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin: 8px 0;
+        }
+        .exp-path-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+            color: #606266;
+            font-size: 12px;
+            flex-wrap: wrap;
+        }
+        .exp-pair-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .exp-pair-row:last-child { margin-bottom: 0; }
+        .exp-pair-row .form-item { margin: 0; }
+        .exp-pair-arrow { color: #909399; flex: none; }
+        .exp-del-btn {
+            flex: none;
+            border: 1px solid #fbc4c4;
+            background: #fef0f0;
+            color: #f56c6c;
+            cursor: pointer;
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-size: 12px;
+        }
+        .exp-del-btn:hover { background: #fde2e2; }
+        .exp-add-btn {
+            flex: none;
+            border: 1px dashed #409eff;
+            color: #409eff;
+            background: #ecf5ff;
+            cursor: pointer;
+            border-radius: 4px;
+            padding: 3px 10px;
+            font-size: 12px;
+        }
+        .exp-add-btn:hover { background: #d9ecff; }
+        .exp-empty-tip { color: #909399; font-size: 12px; padding: 2px 0; }
+        .export-format {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+            margin-bottom: 6px;
+        }
+        .export-format .radio-label { font-size: 13px; }
+        .export-footer {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 18px;
+            border-top: 1px solid #e4e7ed;
+        }
+        .export-footer .btn { flex: none; }
+        .export-footer .panel-btn { padding: 8px 14px; }
+        .export-footer .btn:disabled,
+        .export-footer .btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -454,6 +599,10 @@
             </button>
             <button class="tool-btn" onclick="clearAll()">
                 <span>🗑</span> 清空画布
+            </button>
+            <div class="tool-divider"></div>
+            <button class="tool-btn" onclick="openExportDialog()">
+                <span>📤</span> 导出报告
             </button>
         </div>
     </div>
@@ -605,6 +754,53 @@
     </div>
 </div>
 
+<div id="exportModal" class="modal-mask" style="display:none;" onmousedown="if(event.target===this) closeExportDialog()">
+    <div class="export-box">
+        <div class="export-header">
+            <span>📤 导出数据 / 分析报告</span>
+            <button class="export-close" onclick="closeExportDialog()" title="关闭">✕</button>
+        </div>
+        <div class="export-body">
+            <div class="export-sec-title">导出内容（默认全部导出）</div>
+            <div class="export-checks">
+                <label class="radio-label"><input type="checkbox" data-exp="graph" checked onchange="onExpItemChange()"> 图数据（拓扑文本）</label>
+                <label class="radio-label"><input type="checkbox" data-exp="nodes" checked onchange="onExpItemChange()"> 节点详细信息</label>
+                <label class="radio-label"><input type="checkbox" data-exp="edges" checked onchange="onExpItemChange()"> 连线详细信息</label>
+                <label class="radio-label"><input type="checkbox" data-exp="cycles" checked onchange="onExpItemChange()"> 环路分析</label>
+                <label class="radio-label"><input type="checkbox" data-exp="paths" checked onchange="onExpItemChange()"> 计算的路径</label>
+                <label class="radio-label"><input type="checkbox" data-exp="intersections" checked onchange="onExpItemChange()"> 交点数量</label>
+            </div>
+            <div class="exp-all-btns">
+                <button class="exp-all-btn" onclick="toggleExpAll(true)">✓ 全选</button>
+                <button class="exp-all-btn" onclick="toggleExpAll(false)">✗ 清空</button>
+            </div>
+
+            <div class="exp-path-section" id="expPathSection">
+                <div class="exp-path-head">
+                    <span>路径查询对：每对“起点 → 终点”单独计算并导出（例如 1→6、2→7 可同时添加多组）</span>
+                    <button class="exp-add-btn" onclick="addExportPair()">＋ 添加一组</button>
+                </div>
+                <div id="expPairRows"></div>
+                <div class="exp-empty-tip" id="expPairTip" style="display:none;">当前节点不足 2 个，无法配置路径对（请先在画布中添加节点）。</div>
+            </div>
+
+            <div class="export-sec-title">导出格式</div>
+            <div class="export-format">
+                <label class="radio-label"><input type="radio" name="exportFmt" value="json" checked onchange="onExpFmtChange()"> JSON（结构化数据）</label>
+                <label class="radio-label"><input type="radio" name="exportFmt" value="md" onchange="onExpFmtChange()"> Markdown（.md）</label>
+                <label class="radio-label"><input type="radio" name="exportFmt" value="docx" onchange="onExpFmtChange()"> Word（.docx）</label>
+                <label class="radio-label"><input type="radio" name="exportFmt" value="txt" onchange="onExpFmtChange()"> TXT（纯文本）</label>
+            </div>
+            <div class="tip" id="expTip">JSON 结构化数据文件，适合程序化读取与再处理。</div>
+        </div>
+        <div class="export-footer">
+            <button class="panel-btn" onclick="closeExportDialog()">取消</button>
+            <button class="btn btn-secondary" id="expCopyBtn" onclick="copyExport()">📋 复制到剪贴板</button>
+            <button class="btn" onclick="runExport()">⬇ 导出文件</button>
+        </div>
+    </div>
+</div>
+
 <div id="contextMenu" class="context-menu"></div>
 
 <div id="newNodePanel" class="new-node-panel">
@@ -641,5 +837,6 @@
     <script src="js/core.js"></script>
     <script src="js/analysis.js"></script>
     <script src="js/layout.js"></script>
+    <script src="js/export.js"></script>
 </body>
 </html>
